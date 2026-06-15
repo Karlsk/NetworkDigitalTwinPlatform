@@ -1,0 +1,12 @@
+# 服务全局配置
+neo4j:
+  uri: bolt://localhost:7687
+  user: neo4j
+  password: password
+
+ontology:
+  dir: ontology
+
+snapshot:
+  dir: snapshots
+  max_active: 5

@@ -1,0 +1,3 @@
+# Connector 注册配置
+connectors: []
+# MVP 阶段由 Mock Connector 实现，V1 阶段配置真实数据源
