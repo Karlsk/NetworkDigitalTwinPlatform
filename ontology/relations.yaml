@@ -1,0 +1,31 @@
+apiVersion: twin.io/v1
+kind: RelationType
+metadata:
+  name: HAS_INTERFACE
+spec:
+  source: [Device]
+  target: [Interface]
+---
+apiVersion: twin.io/v1
+kind: RelationType
+metadata:
+  name: RUNS_ON
+spec:
+  source: [ISIS]
+  target: [Interface]
+---
+apiVersion: twin.io/v1
+kind: RelationType
+metadata:
+  name: ENDPOINT
+spec:
+  source: [Link]
+  target: [Interface]
+---
+apiVersion: twin.io/v1
+kind: RelationType
+metadata:
+  name: OCCURRED_ON
+spec:
+  source: [Alarm]
+  target: [Interface]

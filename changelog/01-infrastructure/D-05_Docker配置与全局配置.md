@@ -185,7 +185,7 @@ connectors:
     type: mock
     config:
       data_dir: testdata/mock_cmdb
-    entity_types: [EVPN_Instance, Network_Slice, SRv6_Policy]
+    entity_types: [ISIS, Link, Network_Slice]
 ```
 
 ## 3. 设计原理

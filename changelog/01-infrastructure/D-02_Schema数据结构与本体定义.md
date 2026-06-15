@@ -2,14 +2,14 @@
 
 ## 1. 任务概述
 
-定义 Schema Registry 所需的所有 Go 结构体（EntityType、RelationType 等 K8s CRD 风格），并编写 6 个 EntityType + 5 个 RelationType 的 YAML 本体定义文件。这是系统"单一数据源"的基础，后续 Normalizer、GraphAssembler、Validator 都依赖这些定义。
+定义 Schema Registry 所需的所有 Go 结构体（EntityType、RelationType 等 K8s CRD 风格），并编写 6 个 EntityType + 4 个 RelationType 的 YAML 本体定义文件。这是系统"单一数据源"的基础，后续 Normalizer、GraphAssembler、Validator 都依赖这些定义。
 
 | 属性 | 值 |
 |------|-----|
 | 所属阶段 | Phase 1: 设计阶段 |
 | 预估工时 | 2 天 |
 | 前置任务 | D-01 |
-| 交付物 | `internal/schema/types.go` + 7 个 YAML 文件 |
+| 交付物 | `internal/schema/types.go` + 7 个 YAML 文件（device, interface, isis, link, network_slice, alarm, relations） |
 
 ## 2. 详细实现步骤
 
@@ -164,66 +164,71 @@ spec:
       type: string
 ```
 
-#### `ontology/srv6_policy.yaml` — SRv6_Policy EntityType
+#### `ontology/isis.yaml` — ISIS EntityType
 
 ```yaml
 apiVersion: twin.io/v1
 kind: EntityType
 metadata:
-  name: SRv6_Policy
-  labels: [Service, Network]
+  name: ISIS
+  labels: [Protocol, Network]
 spec:
   identity:
-    stableKeys: [policy_id]
-  uriTemplate: "srv6_policy:{policy_id}"
+    stableKeys: [isis_id]
+  uriTemplate: "isis:{isis_id}"
   fieldMapping: {}
   normalize: []
   relationFields:
-    bind_interface:
-      relationType: RUNS_ON_INTERFACE
+    run_on:
+      relationType: RUNS_ON
   properties:
-    policy_id:
+    isis_id:
       type: string
       required: true
-    name:
+    system_id:
       type: string
-    endpoint:
+      required: true
+    area_id:
       type: string
+    level:
+      type: string
+      enum: [L1, L2, L1L2]
+      default: "L1L2"
     status:
       type: string
       enum: [Active, Inactive]
       default: "Active"
 ```
 
-#### `ontology/evpn_instance.yaml` — EVPN_Instance EntityType
+#### `ontology/link.yaml` — Link EntityType
 
 ```yaml
 apiVersion: twin.io/v1
 kind: EntityType
 metadata:
-  name: EVPN_Instance
-  labels: [Service, Network]
+  name: Link
+  labels: [Resource, Network]
 spec:
   identity:
-    stableKeys: [evpn_id]
-  uriTemplate: "evpn:{evpn_id}"
+    stableKeys: [link_id]
+  uriTemplate: "link:{link_id}"
   fieldMapping: {}
   normalize: []
   relationFields:
-    srv6_policies:
-      relationType: CARRIED_BY
-    network_slices:
-      relationType: BELONGS_TO_SLICE
+    endpoints:
+      relationType: ENDPOINT
   properties:
-    evpn_id:
+    link_id:
       type: string
       required: true
     name:
       type: string
-    rd:
+    bandwidth:
+      type: int
+    status:
       type: string
-    rt:
-      type: string
+      enum: [Up, Down]
+      default: "Up"
 ```
 
 #### `ontology/network_slice.yaml` — Network_Slice EntityType
@@ -297,26 +302,18 @@ spec:
 apiVersion: twin.io/v1
 kind: RelationType
 metadata:
-  name: RUNS_ON_INTERFACE
+  name: RUNS_ON
 spec:
-  source: [SRv6_Policy]
+  source: [ISIS]
   target: [Interface]
 ---
 apiVersion: twin.io/v1
 kind: RelationType
 metadata:
-  name: CARRIED_BY
+  name: ENDPOINT
 spec:
-  source: [EVPN_Instance]
-  target: [SRv6_Policy]
----
-apiVersion: twin.io/v1
-kind: RelationType
-metadata:
-  name: BELONGS_TO_SLICE
-spec:
-  source: [EVPN_Instance]
-  target: [Network_Slice]
+  source: [Link]
+  target: [Interface]
 ---
 apiVersion: twin.io/v1
 kind: RelationType
@@ -347,7 +344,7 @@ spec:
 
 - [ ] `yaml.Unmarshal` 可以正确解析所有 YAML 文件到对应结构体
 - [ ] 6 个 EntityType 的 stableKeys 均为不可变标识
-- [ ] 5 个 RelationType 的 source/target 类型正确
+- [ ] 4 个 RelationType 的 source/target 类型正确
 - [ ] 多文档 YAML（relations.yaml）可被 `yaml.Decoder` 循环 Decode 正确解析
 - [ ] `relationFields` 引用的 RelationType 在 `relations.yaml` 中都有定义
 - [ ] 每个 EntityType 的 `properties` 中 stableKeys 字段标记为 `required: true`
@@ -358,5 +355,4 @@ spec:
 - `uriTemplate` 只能引用 `stableKeys` 中的字段，不能使用可变属性
 - `relationFields` 中的键名（如 `interfaces`）是 Properties 中的字段名，值中的 `relationType` 必须在 `relations.yaml` 中有定义
 - Device 的 `relationFields` 中 `CONNECTS_TO` 在 `relations.yaml` 中暂时未定义，验证时再补充
-- YAML 解析使用 `gopkg.in/yaml.v3`，支持多文档和复杂嵌套
 - 每个 EntityType 至少包含 2-3 个 required 字段用于 Validator 测试

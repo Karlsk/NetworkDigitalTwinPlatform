@@ -76,11 +76,11 @@
 |----------|------|
 | `ontology/device.yaml` | Device EntityType（含 `identity.stableKeys`、`uriTemplate`、`relationFields`） |
 | `ontology/interface.yaml` | Interface EntityType |
-| `ontology/srv6_policy.yaml` | SRv6_Policy EntityType |
-| `ontology/evpn_instance.yaml` | EVPN_Instance EntityType |
+| `ontology/isis.yaml` | ISIS EntityType |
+| `ontology/link.yaml` | Link EntityType |
 | `ontology/network_slice.yaml` | Network_Slice EntityType |
 | `ontology/alarm.yaml` | Alarm EntityType |
-| `ontology/relations.yaml` | RelationType 定义（HAS_INTERFACE / CONNECTS_TO / RUNS_ON_INTERFACE / CARRIED_BY / BELONGS_TO_SLICE / OCCURRED_ON） |
+| `ontology/relations.yaml` | RelationType 定义（HAS_INTERFACE / CONNECTS_TO / RUNS_ON / ENDPOINT / OCCURRED_ON） |
 
 ### 配置文件
 
@@ -193,24 +193,17 @@ spec:
 ---
 kind: RelationType
 metadata:
-  name: RUNS_ON_INTERFACE
+  name: RUNS_ON
 spec:
-  source: [SRv6_Policy]
+  source: [ISIS]
   target: [Interface]
 ---
 kind: RelationType
 metadata:
-  name: CARRIED_BY
+  name: ENDPOINT
 spec:
-  source: [EVPN_Instance]
-  target: [SRv6_Policy]
----
-kind: RelationType
-metadata:
-  name: BELONGS_TO_SLICE
-spec:
-  source: [EVPN_Instance]
-  target: [Network_Slice]
+  source: [Link]
+  target: [Interface]
 ---
 kind: RelationType
 metadata:
@@ -442,8 +435,8 @@ Check: 无错误返回
 | 序号 | 验收项 | 验证方法 | 通过标准 |
 |------|--------|----------|----------|
 | B-01 | YAML 语法正确 | SchemaRegistry.Load() | 6 个 EntityType + RelationType 全部加载成功 |
-| B-02 | EntityType 覆盖完整 | ListEntityTypes() | 包含 Device/Interface/SRv6_Policy/EVPN_Instance/Network_Slice/Alarm |
-| B-03 | RelationType 定义完整 | ListRelationTypes() | 包含 HAS_INTERFACE/RUNS_ON_INTERFACE/CARRIED_BY/BELONGS_TO_SLICE/OCCURRED_ON |
+| B-02 | EntityType 覆盖完整 | ListEntityTypes() | 包含 Device/Interface/ISIS/Link/Network_Slice/Alarm |
+| B-03 | RelationType 定义完整 | ListRelationTypes() | 包含 HAS_INTERFACE/RUNS_ON/ENDPOINT/OCCURRED_ON |
 | B-04 | identity.stableKeys 正确 | 检查每个 EntityType | stableKeys 字段存在且引用不可变标识 |
 | B-05 | relationFields 与 RelationType 一致 | 交叉校验 | relationFields 引用的 RelationType 全部存在 |
 

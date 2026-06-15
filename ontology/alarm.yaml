@@ -1,0 +1,25 @@
+apiVersion: twin.io/v1
+kind: EntityType
+metadata:
+  name: Alarm
+  labels: [Event, Network]
+spec:
+  identity:
+    stableKeys: [alarm_id]
+  uriTemplate: "alarm:{alarm_id}"
+  fieldMapping: {}
+  normalize: []
+  relationFields:
+    occurred_on:
+      relationType: OCCURRED_ON
+  properties:
+    alarm_id:
+      type: string
+      required: true
+    severity:
+      type: string
+      enum: [Critical, Major, Minor, Warning]
+    message:
+      type: string
+    timestamp:
+      type: string

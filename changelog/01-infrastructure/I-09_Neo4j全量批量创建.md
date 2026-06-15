@@ -113,8 +113,8 @@ func groupRelsByType(rels []assembler.Relation) map[string][]assembler.Relation 
 
 ## 4. 验收标准
 
-- [ ] 批量创建 ~20 个节点（3 Device + 12 Interface + 3 SRv6_Policy + 2 EVPN + 1 Slice）
-- [ ] 批量创建 ~30 个关系（HAS_INTERFACE + CONNECTS_TO + RUNS_ON_INTERFACE + CARRIED_BY + BELONGS_TO_SLICE）
+- [ ] 批量创建 ~20 个节点（3 Device + 12 Interface + 3 ISIS + 2 Link）
+- [ ] 批量创建 ~25 个关系（HAS_INTERFACE + CONNECTS_TO + RUNS_ON + ENDPOINT）
 - [ ] Cypher 查询可正确返回创建的节点和关系
 - [ ] 每个节点都有 `_db` 属性
 - [ ] BulkCreate 前必须先 ClearDB（否则会重复）

@@ -2,10 +2,10 @@
 
 ## 项目背景
 
-随着 SRv6、网络切片、Flex-Algo 等下一代网络技术的广泛部署，传统网络运维面临三大核心挑战：
+随着 SRv6、ISIS、链路状态等下一代网络技术的广泛部署，传统网络运维面临三大核心挑战：
 
 - **数据孤岛**：控制器掌握底层协议路径，数据中台掌握资产与客户业务，两层数据割裂无法跨层穿透分析
-- **缺乏语义认知**：传统图数据库仅有节点和线，机器无法理解"Policy 承载 EVPN 业务"等业务逻辑语义
+- **缺乏语义认知**：传统图数据库仅有节点和线，机器无法理解"ISIS 运行在接口上"等业务逻辑语义
 - **高阶运维断层**：故障根因分析依赖专家经验，缺乏割接前的安全沙箱和变更风险预判能力
 
 本项目利用 **本体论（Ontology）** 规范网络世界观，结合 **Neo4j CE + YAML Schema Registry** 构建实时动态的网络数字孪生底座，通过 **MCP 协议** 暴露给外部 Agent 平台（Claude Code / OpenCode），实现自动化根因分析、全网跨层影响范围评估。
@@ -14,7 +14,7 @@
 
 | 能力 | 描述 |
 |------|------|
-| **本体定义体系** | YAML CRD 风格 Schema Registry，6 个 EntityType + 5 个 RelationType |
+| **本体定义体系** | YAML CRD 风格 Schema Registry，6 个 EntityType + 4 个 RelationType |
 | **分层数据流管线** | Connector → Normalizer → GraphAssembler → GraphDB，职责清晰解耦 |
 | **双轨数据同步** | 全量同步 (ClearDB + BulkCreate) + 增量同步 (Webhook + Channel 缓冲) |
 | **快照回溯** | YAML 归档永久保留 + Neo4j 逻辑 DB 懒加载，支持创建/恢复/对比 |
@@ -127,8 +127,8 @@ network-digital-twin/
 ├── ontology/                          # 本体 Schema 定义 (YAML CRD 风格)
 │   ├── device.yaml                    # Device EntityType
 │   ├── interface.yaml                 # Interface EntityType
-│   ├── srv6_policy.yaml               # SRv6_Policy EntityType
-│   ├── evpn_instance.yaml             # EVPN_Instance EntityType
+│   ├── isis.yaml                      # ISIS EntityType
+│   ├── link.yaml                      # Link EntityType
 │   ├── network_slice.yaml             # Network_Slice EntityType
 │   ├── alarm.yaml                     # Alarm EntityType
 │   └── relations.yaml                 # 关系定义 (RelationType)
