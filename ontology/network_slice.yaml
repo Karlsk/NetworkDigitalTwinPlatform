@@ -1,0 +1,22 @@
+apiVersion: twin.io/v1
+kind: EntityType
+metadata:
+  name: Network_Slice
+  labels: [Service, Network]
+spec:
+  identity:
+    stableKeys: [slice_id]
+  uriTemplate: "slice:{slice_id}"
+  fieldMapping: {}
+  normalize: []
+  relationFields: {}
+  properties:
+    slice_id:
+      type: string
+      required: true
+    name:
+      type: string
+    sla_bandwidth:
+      type: int
+    sla_latency:
+      type: int

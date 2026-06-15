@@ -2,7 +2,7 @@
 
 ## 1. 任务概述
 
-实现 Mock Connector，从 `testdata/` 目录读取 JSON 文件作为模拟数据源。提供 3 台设备、~12 个接口、若干 SRv6 Policy/EVPN/切片数据（~20 个节点），用于开发调试和集成测试。
+实现 Mock Connector，从 `testdata/` 目录读取 JSON 文件作为模拟数据源。提供 3 台设备、~12 个接口、若干 ISIS/Link/切片数据（~20 个节点），用于开发调试和集成测试。
 
 | 属性 | 值 |
 |------|-----|
@@ -87,8 +87,8 @@ func (m *MockConnector) Stream(ctx context.Context, entityType string) (<-chan c
 var entityTypeToFile = map[string]string{
     "Device":          "devices.json",
     "Interface":       "interfaces.json",
-    "SRv6_Policy":     "srv6_policies.json",
-    "EVPN_Instance":   "evpn_instances.json",
+    "ISIS":            "isis.json",
+    "Link":            "links.json",
     "Network_Slice":   "network_slices.json",
     "Alarm":           "alarms.json",
 }
@@ -157,22 +157,22 @@ var entityTypeToFile = map[string]string{
 ]
 ```
 
-**文件**: `testdata/mock_cmdb/srv6_policies.json`（3 条 SRv6 Policy）
+**文件**: `testdata/mock_cmdb/isis.json`（3 条 ISIS 路由协议实例）
 
 ```json
 [
-  {"policy_id": "SRV6-P001", "name": "Core-to-Edge-Primary", "endpoint": "10.1.1.1", "status": "Active", "bind_interface": ["iface:SN12345_GE1/0/1"]},
-  {"policy_id": "SRV6-P002", "name": "Core-to-Edge-Backup", "endpoint": "10.1.1.2", "status": "Active", "bind_interface": ["iface:SN12345_GE1/0/2"]},
-  {"policy_id": "SRV6-P003", "name": "Edge-to-Access", "endpoint": "10.2.1.1", "status": "Inactive", "bind_interface": ["iface:SN12346_GE1/0/2"]}
+  {"isis_id": "ISIS-001", "system_id": "0000.0000.0001", "area_id": "49.0001", "level": "L1L2", "status": "Active", "run_on": ["iface:SN12345_GE1/0/1"]},
+  {"isis_id": "ISIS-002", "system_id": "0000.0000.0002", "area_id": "49.0001", "level": "L1L2", "status": "Active", "run_on": ["iface:SN12345_GE1/0/2"]},
+  {"isis_id": "ISIS-003", "system_id": "0000.0000.0003", "area_id": "49.0001", "level": "L2", "status": "Inactive", "run_on": ["iface:SN12346_GE1/0/2"]}
 ]
 ```
 
-**文件**: `testdata/mock_cmdb/evpn_instances.json`（2 个 EVPN 实例）
+**文件**: `testdata/mock_cmdb/links.json`（2 条链路）
 
 ```json
 [
-  {"evpn_id": "EVPN-001", "name": "Customer-A-VPN", "rd": "100:1", "rt": "100:1", "srv6_policies": ["srv6_policy:SRV6-P001"], "network_slices": ["slice:SLICE-001"]},
-  {"evpn_id": "EVPN-002", "name": "Customer-B-VPN", "rd": "200:1", "rt": "200:1", "srv6_policies": ["srv6_policy:SRV6-P002"], "network_slices": ["slice:SLICE-001"]}
+  {"link_id": "LINK-001", "name": "Core-to-Edge-Primary", "bandwidth": 10000, "status": "Up", "endpoints": ["iface:SN12345_GE1/0/1", "iface:SN12346_GE1/0/1"]},
+  {"link_id": "LINK-002", "name": "Core-to-Edge-Backup", "bandwidth": 10000, "status": "Up", "endpoints": ["iface:SN12345_GE1/0/2", "iface:SN12346_GE1/0/2"]}
 ]
 ```
 
@@ -188,19 +188,19 @@ var entityTypeToFile = map[string]string{
 
 - **Mock 数据格式**：JSON 数组，每个元素是一条记录的 Properties，字段名与 Schema 的 `fieldMapping` 对应
 - **关系字段以 URI 形式存储**：如 `interfaces: ["iface:SN12345_GE1/0/1", ...]`，Normalizer 保留在 Properties 中，GraphAssembler 推导为图边
-- **两个 Mock 数据源**：mock-netbox（设备/接口）和 mock-cmdb（SRv6/EVPN/切片），模拟真实的多源场景
+- **两个 Mock 数据源**：mock-netbox（设备/接口）和 mock-cmdb（ISIS/Link/切片），模拟真实的多源场景
 - **Stream 返回 ErrNotImplemented**：MVP 不实现流式推送
 
 ## 4. 验收标准
 
 - [ ] `Collect("Device")` 返回 3 个 Resource
 - [ ] `Collect("Interface")` 返回 12 个 Resource
-- [ ] `Collect("SRv6_Policy")` 返回 3 个 Resource
-- [ ] `Collect("EVPN_Instance")` 返回 2 个 Resource
+- [ ] `Collect("ISIS")` 返回 3 个 Resource
+- [ ] `Collect("Link")` 返回 2 个 Resource
 - [ ] `Collect("Network_Slice")` 返回 1 个 Resource
 - [ ] `Stream()` 返回 ErrNotImplemented
 - [ ] Mock 数据的字段名与 Schema 的 fieldMapping 对应（如 `mgmt_ip` 而非 `management_ip`）
-- [ ] 关系字段（interfaces/upstream_links/bind_interface/srv6_policies/network_slices）以 URI 列表形式存在
+- [ ] 关系字段（interfaces/upstream_links/run_on/endpoints）以 URI 列表形式存在
 
 ## 5. 注意事项
 

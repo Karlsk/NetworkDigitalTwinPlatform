@@ -192,11 +192,11 @@ type Metadata struct {
 **Day 2: 本体 YAML 定义**
 - `ontology/device.yaml`: Device EntityType（完整示例，含 identity/uriTemplate/fieldMapping/normalize/relationFields/properties）
 - `ontology/interface.yaml`: Interface EntityType
-- `ontology/srv6_policy.yaml`: SRv6_Policy EntityType
-- `ontology/evpn_instance.yaml`: EVPN_Instance EntityType
+- `ontology/isis.yaml`: ISIS EntityType
+- `ontology/link.yaml`: Link EntityType
 - `ontology/network_slice.yaml`: Network_Slice EntityType
 - `ontology/alarm.yaml`: Alarm EntityType
-- `ontology/relations.yaml`: RelationType 定义（HAS_INTERFACE / RUNS_ON_INTERFACE / CARRIED_BY / BELONGS_TO_SLICE / OCCURRED_ON）
+- `ontology/relations.yaml`: RelationType 定义（HAS_INTERFACE / RUNS_ON / ENDPOINT / OCCURRED_ON）
 
 **注意事项**:
 - `identity.stableKeys` 必须选择不可变标识（serial_number / chassis_mac）
@@ -207,7 +207,7 @@ type Metadata struct {
 **验收标准**:
 - `yaml.Unmarshal` 可以正确解析所有 YAML 文件到结构体
 - 6 个 EntityType 的 stableKeys 均为不可变标识
-- 5 个 RelationType 的 source/target 类型正确
+- 4 个 RelationType 的 source/target 类型正确
 
 ---
 
@@ -497,7 +497,7 @@ func Load(path string) (*Config, error)  // Viper 加载
 - 交叉校验失败时 log.Warn 但不阻止加载（允许先定义 relationFields 再补 RelationType）
 
 **验收标准**:
-- Load 成功加载 6 个 EntityType + 5 个 RelationType
+- Load 成功加载 6 个 EntityType + 4 个 RelationType
 - GetEntityType("Device") 返回完整的 EntityType 结构体
 - GetEntityType("NotExist") 返回 error
 
@@ -570,14 +570,14 @@ connectors:
     type: mock
     config:
       data_dir: testdata/mock_cmdb
-    entity_types: [EVPN_Instance, Network_Slice, SRv6_Policy]
+    entity_types: [ISIS, Link, Network_Slice]
 ```
 
 `testdata/mock_netbox/devices.json`: 3 台设备（含 serial_number, hostname, vendor, model, mgmt_ip, status, device_type）
 `testdata/mock_netbox/interfaces.json`: ~12 个接口（含 device_serial, if_name, status, bandwidth）
-`testdata/mock_cmdb/evpn_instances.json`: 2-3 个 EVPN 实例
+`testdata/mock_cmdb/isis.json`: 2-3 个 ISIS 路由协议实例
+`testdata/mock_cmdb/links.json`: 2-3 条链路数据
 `testdata/mock_cmdb/network_slices.json`: 1-2 个切片
-`testdata/mock_cmdb/srv6_policies.json`: 2-4 条 SRv6 Policy
 
 **注意事项**:
 - Mock 数据的字段名需要与 Schema 的 `fieldMapping` 对应（如 devices.json 用 `mgmt_ip`，Schema 映射为 `management_ip`）

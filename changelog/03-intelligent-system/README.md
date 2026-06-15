@@ -152,7 +152,7 @@ func (s *MCPServer) handleListTools() []ToolDescriptor
 | 文件路径 | 用途 |
 |----------|------|
 | `testdata/mock_netbox/` | Mock Netbox 数据（devices.json, interfaces.json） |
-| `testdata/mock_cmdb/` | Mock CMDB 数据（evpn_instances.json, network_slices.json） |
+| `testdata/mock_cmdb/` | Mock CMDB 数据（isis.json, links.json） |
 | `testdata/golden/expected_topology.yaml` | Golden File：期望的拓扑输出 |
 | `testdata/golden/expected_analysis.json` | Golden File：期望的节点/关系计数 |
 

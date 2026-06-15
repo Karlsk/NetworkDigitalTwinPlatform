@@ -1,0 +1,27 @@
+apiVersion: twin.io/v1
+kind: EntityType
+metadata:
+  name: Interface
+  labels: [Resource, Network]
+spec:
+  identity:
+    stableKeys: [device_serial, if_name]
+  uriTemplate: "iface:{device_serial}_{if_name}"
+  fieldMapping: {}
+  normalize: []
+  relationFields: {}
+  properties:
+    device_serial:
+      type: string
+      required: true
+    if_name:
+      type: string
+      required: true
+    status:
+      type: string
+      enum: [Up, Down]
+      default: "Up"
+    bandwidth:
+      type: int
+    description:
+      type: string

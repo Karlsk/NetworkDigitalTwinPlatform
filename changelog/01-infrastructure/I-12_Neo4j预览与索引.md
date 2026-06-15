@@ -119,7 +119,7 @@ func (c *neo4jClient) ensureIndexes(ctx context.Context, entityTypes []string) e
 
 ### 索引与 EntityType 的对应关系
 
-- 每个 EntityType（Device、Interface、SRv6_Policy 等）需要一个复合索引
+- 每个 EntityType（Device、Interface、ISIS 等）需要一个复合索引
 - 系统启动时从 SchemaRegistry 获取所有 EntityType 名称，逐一创建索引
 
 ## 4. 验收标准

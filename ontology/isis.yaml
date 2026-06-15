@@ -1,0 +1,31 @@
+apiVersion: twin.io/v1
+kind: EntityType
+metadata:
+  name: ISIS
+  labels: [Protocol, Network]
+spec:
+  identity:
+    stableKeys: [isis_id]
+  uriTemplate: "isis:{isis_id}"
+  fieldMapping: {}
+  normalize: []
+  relationFields:
+    run_on:
+      relationType: RUNS_ON
+  properties:
+    isis_id:
+      type: string
+      required: true
+    system_id:
+      type: string
+      required: true
+    area_id:
+      type: string
+    level:
+      type: string
+      enum: [L1, L2, L1L2]
+      default: "L1L2"
+    status:
+      type: string
+      enum: [Active, Inactive]
+      default: "Active"

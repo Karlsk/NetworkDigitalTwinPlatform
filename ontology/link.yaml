@@ -1,0 +1,26 @@
+apiVersion: twin.io/v1
+kind: EntityType
+metadata:
+  name: Link
+  labels: [Resource, Network]
+spec:
+  identity:
+    stableKeys: [link_id]
+  uriTemplate: "link:{link_id}"
+  fieldMapping: {}
+  normalize: []
+  relationFields:
+    endpoints:
+      relationType: ENDPOINT
+  properties:
+    link_id:
+      type: string
+      required: true
+    name:
+      type: string
+    bandwidth:
+      type: int
+    status:
+      type: string
+      enum: [Up, Down]
+      default: "Up"

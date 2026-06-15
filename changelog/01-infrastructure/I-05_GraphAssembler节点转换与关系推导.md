@@ -199,10 +199,10 @@ func containsStr(slice []string, item string) bool {
 
 - [ ] Device → Node 转换正确，Props 不含关系字段（interfaces/upstream_links 被过滤）
 - [ ] Interface → Node 转换正确（无 relationFields 的实体不过滤）
-- [ ] relationFields 正确推导为 Relation（HAS_INTERFACE/CONNECTS_TO/RUNS_ON_INTERFACE/CARRIED_BY/BELONGS_TO_SLICE）
-- [ ] RelationType 的 source 类型校验生效（Device 不能产生 RUNS_ON_INTERFACE 关系）
+- [ ] relationFields 正确推导为 Relation（HAS_INTERFACE/CONNECTS_TO/RUNS_ON/ENDPOINT）
+- [ ] RelationType 的 source 类型校验生效（Device 不能产生 RUNS_ON 关系）
 - [ ] 孤儿边被跳过，返回 ValidationWarning
-- [ ] 多类型混合批量处理（Device + Interface + SRv6_Policy 同时传入）
+- [ ] 多类型混合批量处理（Device + Interface + ISIS 同时传入）
 - [ ] 空 relationFields 的实体只生成节点，无关系
 
 ## 5. 注意事项

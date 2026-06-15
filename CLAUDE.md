@@ -553,3 +553,9 @@ func NewSyncService(...) *SyncService { ... }
 | YAML 快照永久保留 | 删除快照只清理 Neo4j 逻辑 DB，YAML 归档不删除 |
 | 属性增量合并 | `SET d += $props`，未传入的属性保持不变 |
 | 关系增量更新 | MERGE 新增，只有 `delete_relation` 事件才删除 |
+
+<!-- SPECKIT START -->
+For additional context about technologies to be used, project structure,
+shell commands, and other important information, read the current plan:
+`specs/001-schema-ontology-types/plan.md`
+<!-- SPECKIT END -->

@@ -46,8 +46,8 @@
 |----------|------|
 | `testdata/mock_netbox/devices.json` | 3 台设备数据（Core01, Edge05, Access03） |
 | `testdata/mock_netbox/interfaces.json` | ~18 个接口（每台 6 个，含 Up/Down/AdminDown 状态） |
-| `testdata/mock_cmdb/evpn_instances.json` | 2-3 个 EVPN 实例（关联 Policy 和 Slice） |
-| `testdata/mock_cmdb/network_slices.json` | 1-2 个网络切片（Standard/Premium） |
+| `testdata/mock_cmdb/isis.json` | 2-3 个 ISIS 路由协议实例 |
+| `testdata/mock_cmdb/links.json` | 2-3 条链路数据 |
 | `testdata/golden/expected_topology.yaml` | 期望的完整拓扑输出（Golden File） |
 | `testdata/golden/expected_analysis.json` | 期望的节点/关系计数 |
 
@@ -346,8 +346,8 @@ DELETE r
 ```go
 // TC-SYNC-01: 全量导入
 Step:  FullSync()
-Check: 返回 SyncResult{NodesCreated: 20+, RelationsCreated: 30+}
-       Neo4j 中存在 3 个 Device、12+ 个 Interface、3+ 个 SRv6_Policy
+Check: 返回 SyncResult{NodesCreated: 20+, RelationsCreated: 25+}
+       Neo4j 中存在 3 个 Device、12+ 个 Interface、3+ 个 ISIS
 
 // TC-SYNC-02: 孤儿边检测
 Step:  注入引用不存在 Interface 的 Device

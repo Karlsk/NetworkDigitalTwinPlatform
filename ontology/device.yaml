@@ -1,0 +1,43 @@
+apiVersion: twin.io/v1
+kind: EntityType
+metadata:
+  name: Device
+  labels: [Resource, Network]
+spec:
+  identity:
+    stableKeys: [serial_number]
+  uriTemplate: "device:{serial_number}"
+  fieldMapping:
+    mgmt_ip: management_ip
+    hw_model: model
+  normalize:
+    - field: hostname
+      pattern: " "
+      replace: "_"
+  relationFields:
+    interfaces:
+      relationType: HAS_INTERFACE
+    upstream_links:
+      relationType: CONNECTS_TO
+  properties:
+    serial_number:
+      type: string
+      required: true
+    hostname:
+      type: string
+      required: true
+    vendor:
+      type: string
+    model:
+      type: string
+    management_ip:
+      type: string
+    chassis_mac:
+      type: string
+    status:
+      type: string
+      enum: [Up, Down, Maintenance]
+      default: "Up"
+    device_type:
+      type: string
+      enum: [Core, Edge, Access]
