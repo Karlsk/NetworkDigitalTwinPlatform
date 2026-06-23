@@ -117,6 +117,54 @@ func TestRelationFields(t *testing.T) {
 	}
 }
 
+func TestGraphModelFields(t *testing.T) {
+	gm := GraphModel{
+		Nodes: []Node{
+			{Label: "Device", URI: "device:SN001", Props: map[string]any{"hostname": "router-01"}},
+			{Label: "Interface", URI: "iface:SN001_eth0"},
+		},
+		Relations: []Relation{
+			{Type: "HAS_INTERFACE", From: "device:SN001", To: "iface:SN001_eth0"},
+		},
+	}
+
+	if len(gm.Nodes) != 2 {
+		t.Errorf("Nodes count = %d, want 2", len(gm.Nodes))
+	}
+	if len(gm.Relations) != 1 {
+		t.Errorf("Relations count = %d, want 1", len(gm.Relations))
+	}
+	if gm.Nodes[0].Label != "Device" {
+		t.Errorf("Nodes[0].Label = %q, want %q", gm.Nodes[0].Label, "Device")
+	}
+	if gm.Relations[0].Type != "HAS_INTERFACE" {
+		t.Errorf("Relations[0].Type = %q, want %q", gm.Relations[0].Type, "HAS_INTERFACE")
+	}
+}
+
+func TestGraphModelEmpty(t *testing.T) {
+	gm := GraphModel{}
+	if gm.Nodes != nil {
+		t.Errorf("expected nil Nodes for zero-value, got %v", gm.Nodes)
+	}
+	if gm.Relations != nil {
+		t.Errorf("expected nil Relations for zero-value, got %v", gm.Relations)
+	}
+}
+
+func TestValidationWarningFields(t *testing.T) {
+	w := ValidationWarning{
+		Type:   "orphan_edge",
+		Detail: "HAS_INTERFACE: device:SN12345 → iface:SN12345_GE1/0/2",
+	}
+	if w.Type != "orphan_edge" {
+		t.Errorf("Type = %q, want %q", w.Type, "orphan_edge")
+	}
+	if w.Detail != "HAS_INTERFACE: device:SN12345 → iface:SN12345_GE1/0/2" {
+		t.Errorf("Detail = %q, want full orphan edge detail", w.Detail)
+	}
+}
+
 // TestNodePropsMapIsReference verifies that Props is a map (reference type),
 // so assigning the same map to two Nodes shares the underlying data.
 func TestNodePropsMapIsReference(t *testing.T) {

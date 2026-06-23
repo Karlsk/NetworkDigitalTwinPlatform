@@ -23,3 +23,18 @@ type Relation struct {
 	To    string         // 目标节点 URI
 	Props map[string]any // 关系属性（通常为空）
 }
+
+// GraphModel 纯图元素的中间表示，与数据源和 Schema 完全解耦。
+// 由 GraphAssembler 产出，被 GraphDB 消费。
+type GraphModel struct {
+	Nodes     []Node     // 图节点集合
+	Relations []Relation // 图边集合
+}
+
+// ValidationWarning 图模型校验警告。
+// GraphAssembler 在组装过程中发现孤儿边等异常时产出，
+// 不阻断同步流程，由 SyncResult 汇总上报。
+type ValidationWarning struct {
+	Type   string // 警告类型，如 "orphan_edge"
+	Detail string // 警告详情，如 "HAS_INTERFACE: device:SN12345 → iface:SN12345_GE1/0/2"
+}
