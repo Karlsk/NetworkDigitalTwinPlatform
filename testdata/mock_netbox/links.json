@@ -1,0 +1,4 @@
+[
+  {"link_id": "LINK-001", "name": "Core-to-Edge-Primary", "bandwidth": 10000, "status": "Up", "endpoints": ["iface:SN12345_GE1/0/1", "iface:SN12346_GE1/0/1"]},
+  {"link_id": "LINK-002", "name": "Core-to-Edge-Backup", "bandwidth": 10000, "status": "Up", "endpoints": ["iface:SN12345_GE1/0/2", "iface:SN12346_GE1/0/2"]}
+]

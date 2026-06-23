@@ -1,0 +1,5 @@
+[
+  {"isis_id": "ISIS-001", "system_id": "0000.0000.0001", "area_id": "49.0001", "level": "L1L2", "status": "Active", "run_on": ["iface:SN12345_GE1/0/1"]},
+  {"isis_id": "ISIS-002", "system_id": "0000.0000.0002", "area_id": "49.0001", "level": "L1L2", "status": "Active", "run_on": ["iface:SN12345_GE1/0/2"]},
+  {"isis_id": "ISIS-003", "system_id": "0000.0000.0003", "area_id": "49.0001", "level": "L2", "status": "Inactive", "run_on": ["iface:SN12346_GE1/0/2"]}
+]

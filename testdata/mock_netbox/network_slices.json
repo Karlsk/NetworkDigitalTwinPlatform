@@ -1,0 +1,3 @@
+[
+  {"slice_id": "SLICE-001", "name": "Enterprise-Slice", "sla_bandwidth": 10000, "sla_latency": 50}
+]

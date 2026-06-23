@@ -1,0 +1,37 @@
+[
+  {
+    "serial_number": "SN12345",
+    "hostname": "Router Core 01",
+    "vendor": "Huawei",
+    "hw_model": "NE40E",
+    "mgmt_ip": "10.0.0.1",
+    "chassis_mac": "AA:BB:CC:01:02:03",
+    "status": "Up",
+    "device_type": "Core",
+    "interfaces": ["iface:SN12345_GE1/0/1", "iface:SN12345_GE1/0/2", "iface:SN12345_GE1/0/3", "iface:SN12345_GE1/0/4"]
+  },
+  {
+    "serial_number": "SN12346",
+    "hostname": "Router Edge 01",
+    "vendor": "Huawei",
+    "hw_model": "NE20E",
+    "mgmt_ip": "10.0.0.2",
+    "chassis_mac": "AA:BB:CC:01:02:04",
+    "status": "Up",
+    "device_type": "Edge",
+    "interfaces": ["iface:SN12346_GE1/0/1", "iface:SN12346_GE1/0/2", "iface:SN12346_GE1/0/3", "iface:SN12346_GE1/0/4"],
+    "upstream_links": ["iface:SN12345_GE1/0/1"]
+  },
+  {
+    "serial_number": "SN12347",
+    "hostname": "Switch Access 01",
+    "vendor": "Huawei",
+    "hw_model": "S5700",
+    "mgmt_ip": "10.0.0.3",
+    "chassis_mac": "AA:BB:CC:01:02:05",
+    "status": "Up",
+    "device_type": "Access",
+    "interfaces": ["iface:SN12347_GE1/0/1", "iface:SN12347_GE1/0/2", "iface:SN12347_GE1/0/3", "iface:SN12347_GE1/0/4"],
+    "upstream_links": ["iface:SN12346_GE1/0/1"]
+  }
+]

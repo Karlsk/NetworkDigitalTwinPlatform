@@ -1,0 +1,14 @@
+[
+  {"device_serial": "SN12345", "if_name": "GE1/0/1", "status": "Up", "bandwidth": 10000, "description": "Uplink to Edge01"},
+  {"device_serial": "SN12345", "if_name": "GE1/0/2", "status": "Up", "bandwidth": 10000, "description": "Uplink backup"},
+  {"device_serial": "SN12345", "if_name": "GE1/0/3", "status": "Down", "bandwidth": 1000, "description": "Unused"},
+  {"device_serial": "SN12345", "if_name": "GE1/0/4", "status": "Up", "bandwidth": 1000, "description": "Management"},
+  {"device_serial": "SN12346", "if_name": "GE1/0/1", "status": "Up", "bandwidth": 10000, "description": "Uplink to Core01"},
+  {"device_serial": "SN12346", "if_name": "GE1/0/2", "status": "Up", "bandwidth": 10000, "description": "Downlink to Access01"},
+  {"device_serial": "SN12346", "if_name": "GE1/0/3", "status": "Up", "bandwidth": 1000, "description": "Customer A"},
+  {"device_serial": "SN12346", "if_name": "GE1/0/4", "status": "Down", "bandwidth": 1000, "description": "Unused"},
+  {"device_serial": "SN12347", "if_name": "GE1/0/1", "status": "Up", "bandwidth": 1000, "description": "Uplink to Edge01"},
+  {"device_serial": "SN12347", "if_name": "GE1/0/2", "status": "Up", "bandwidth": 1000, "description": "Access port 1"},
+  {"device_serial": "SN12347", "if_name": "GE1/0/3", "status": "Up", "bandwidth": 1000, "description": "Access port 2"},
+  {"device_serial": "SN12347", "if_name": "GE1/0/4", "status": "Up", "bandwidth": 1000, "description": "Access port 3"}
+]
