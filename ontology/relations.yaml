@@ -25,6 +25,14 @@ spec:
 apiVersion: twin.io/v1
 kind: RelationType
 metadata:
+  name: CONNECTS_TO
+spec:
+  source: [Device]
+  target: [Device]
+---
+apiVersion: twin.io/v1
+kind: RelationType
+metadata:
   name: OCCURRED_ON
 spec:
   source: [Alarm]

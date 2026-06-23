@@ -379,8 +379,8 @@ func TestLoadOntologyDir(t *testing.T) {
 	if len(entityTypes) != 6 {
 		t.Errorf("entityTypes count = %d, want 6", len(entityTypes))
 	}
-	if len(relationTypes) != 4 {
-		t.Errorf("relationTypes count = %d, want 4", len(relationTypes))
+	if len(relationTypes) != 5 {
+		t.Errorf("relationTypes count = %d, want 5", len(relationTypes))
 	}
 
 	// Build lookup maps

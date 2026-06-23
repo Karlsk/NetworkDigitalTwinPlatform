@@ -15,4 +15,8 @@ var (
 	// ErrInvalidAPIVersion indicates the apiVersion field does not match
 	// the expected value "twin.io/v1".
 	ErrInvalidAPIVersion = errors.New("invalid api version")
+
+	// ErrSchemaNotFound indicates the requested EntityType or RelationType
+	// does not exist in the registry.
+	ErrSchemaNotFound = errors.New("schema not found")
 )

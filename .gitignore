@@ -35,3 +35,6 @@ Thumbs.db
 
 # Snapshots (generated data)
 snapshots/
+
+.qoder
+.claude
