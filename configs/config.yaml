@@ -1,12 +1,19 @@
 # 服务全局配置
 neo4j:
-  uri: bolt://localhost:7687
-  user: neo4j
-  password: password
+  uri: "bolt://localhost:7687"
+  user: "neo4j"
+  password: "password"
+  default_db: "default"
 
-ontology:
-  dir: ontology
+server:
+  port: 8080
 
 snapshot:
-  dir: snapshots
+  dir: "snapshots"
   max_active: 5
+
+schema:
+  ontology_dir: "ontology"
+
+channel:
+  buffer_size: 100

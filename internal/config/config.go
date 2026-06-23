@@ -1,42 +1,97 @@
-// Package config 提供全局配置加载功能
+// Package config 提供全局配置加载功能，基于 Viper 实现 YAML 文件加载与环境变量覆盖
 package config
 
-// Config 是全局配置结构体
+import (
+	"os"
+
+	"github.com/spf13/viper"
+)
+
+// Config 服务全局配置
 type Config struct {
-	Neo4j    Neo4jConfig
-	Ontology OntologyConfig
-	Snapshot SnapshotConfig
+	Neo4J    Neo4JConfig    `mapstructure:"neo4j"`
+	Server   ServerConfig   `mapstructure:"server"`
+	Snapshot SnapshotConfig `mapstructure:"snapshot"`
+	Schema   SchemaConfig   `mapstructure:"schema"`
+	Channel  ChannelConfig  `mapstructure:"channel"`
 }
 
-// Neo4jConfig 是 Neo4j 连接配置
-type Neo4jConfig struct {
-	URI      string `yaml:"uri"`
-	User     string `yaml:"user"`
-	Password string `yaml:"password"`
+// Neo4JConfig 是 Neo4j 连接配置
+type Neo4JConfig struct {
+	URI       string `mapstructure:"uri"`
+	User      string `mapstructure:"user"`
+	Password  string `mapstructure:"password"`
+	DefaultDB string `mapstructure:"default_db"`
 }
 
-// OntologyConfig 是本体 Schema 配置
-type OntologyConfig struct {
-	Dir string `yaml:"dir"`
+// ServerConfig 是 HTTP 服务配置
+type ServerConfig struct {
+	Port int `mapstructure:"port"`
 }
 
 // SnapshotConfig 是快照管理配置
 type SnapshotConfig struct {
-	Dir       string `yaml:"dir"`
-	MaxActive int    `yaml:"max_active"`
+	Dir       string `mapstructure:"dir"`
+	MaxActive int    `mapstructure:"max_active"`
 }
 
-// Load 从指定路径加载配置文件
-// path: 配置文件路径 (如 configs/config.yaml)
+// SchemaConfig 是本体 Schema 配置
+type SchemaConfig struct {
+	OntologyDir string `mapstructure:"ontology_dir"`
+}
+
+// ChannelConfig 是事件 Channel 缓冲配置
+type ChannelConfig struct {
+	BufferSize int `mapstructure:"buffer_size"`
+}
+
+// Load 从 YAML 文件加载配置，支持环境变量覆盖
+// path: 配置文件路径（如 configs/config.yaml）
 func Load(path string) (*Config, error) {
-	// TODO: D-05 实现 Viper 配置加载
-	return &Config{
-		Neo4j: Neo4jConfig{
-			URI:      "bolt://localhost:7687",
-			User:     "neo4j",
-			Password: "password",
-		},
-		Ontology: OntologyConfig{Dir: "ontology"},
-		Snapshot: SnapshotConfig{Dir: "snapshots", MaxActive: 5},
-	}, nil
+	v := viper.New()
+	v.SetConfigFile(path)
+	v.AutomaticEnv() // 支持环境变量覆盖
+
+	// 设置默认值
+	v.SetDefault("neo4j.default_db", "default")
+	v.SetDefault("server.port", 8080)
+	v.SetDefault("snapshot.dir", "snapshots")
+	v.SetDefault("snapshot.max_active", 5)
+	v.SetDefault("schema.ontology_dir", "ontology")
+	v.SetDefault("channel.buffer_size", 100)
+
+	if err := v.ReadInConfig(); err != nil {
+		return nil, err
+	}
+
+	var cfg Config
+	if err := v.Unmarshal(&cfg); err != nil {
+		return nil, err
+	}
+
+	// 手动应用环境变量覆盖（viper.Unmarshal 对嵌套 key 的 env 支持不完整）
+	applyEnvOverrides(&cfg)
+
+	return &cfg, nil
+}
+
+// applyEnvOverrides 从环境变量覆盖配置值
+func applyEnvOverrides(cfg *Config) {
+	if v := envStr("NEO4J_URI"); v != "" {
+		cfg.Neo4J.URI = v
+	}
+	if v := envStr("NEO4J_USER"); v != "" {
+		cfg.Neo4J.User = v
+	}
+	if v := envStr("NEO4J_PASSWORD"); v != "" {
+		cfg.Neo4J.Password = v
+	}
+	if v := envStr("NEO4J_DEFAULT_DB"); v != "" {
+		cfg.Neo4J.DefaultDB = v
+	}
+}
+
+func envStr(key string) string {
+	v, _ := os.LookupEnv(key)
+	return v
 }

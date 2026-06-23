@@ -1,3 +1,11 @@
-# Connector 注册配置
-connectors: []
-# MVP 阶段由 Mock Connector 实现，V1 阶段配置真实数据源
+connectors:
+  - name: mock-netbox
+    type: mock
+    config:
+      data_dir: testdata/mock_netbox
+    entity_types: [Device, Interface]
+  - name: mock-cmdb
+    type: mock
+    config:
+      data_dir: testdata/mock_cmdb
+    entity_types: [ISIS, Link, Network_Slice]
