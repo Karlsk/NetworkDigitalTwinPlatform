@@ -2,6 +2,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 
 	"github.com/spf13/viper"
@@ -61,12 +62,12 @@ func Load(path string) (*Config, error) {
 	v.SetDefault("channel.buffer_size", 100)
 
 	if err := v.ReadInConfig(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("read config %s: %w", path, err)
 	}
 
 	var cfg Config
 	if err := v.Unmarshal(&cfg); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("unmarshal config: %w", err)
 	}
 
 	// 手动应用环境变量覆盖（viper.Unmarshal 对嵌套 key 的 env 支持不完整）
