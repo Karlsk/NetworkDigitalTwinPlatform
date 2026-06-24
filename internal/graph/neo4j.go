@@ -1,1 +1,201 @@
+// Package graph 封装图数据库驱动层。
+// neo4j.go 实现 Neo4j 连接基础设施：构造函数、Ping、Close。
 package graph
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+
+	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
+	"github.com/neo4j/neo4j-go-driver/v5/neo4j/auth"
+	"gitlab.com/pml/network-digital-twin/internal/config"
+)
+
+// driverFactory 是 driver 创建函数的抽象点，默认指向官方实现。
+// 测试时替换为返回 mock driver 的函数，以实现无外部依赖的单元测试。
+var driverFactory = neo4j.NewDriverWithContext
+
+// session 抽象 Neo4j session 的核心操作。
+// neo4j.SessionWithContext 通过 sessionWrapper 适配满足此接口。
+// 定义此接口是因为 SessionWithContext 含未导出方法，无法在包外 mock。
+type session interface {
+	Run(ctx context.Context, cypher string, params map[string]any, configurers ...func(*neo4j.TransactionConfig)) (result, error)
+	Close(ctx context.Context) error
+}
+
+// result 抽象 Neo4j 结果游标的核心操作。
+// neo4j.ResultWithContext 满足此接口（鸭子类型）。
+type result interface {
+	Next(ctx context.Context) bool
+	Record() *neo4j.Record
+	Err() error
+}
+
+// sessionWrapper 将 neo4j.SessionWithContext 适配为内部 session 接口。
+// 同时将 ResultWithContext 适配为 result 接口。
+type sessionWrapper struct {
+	inner neo4j.SessionWithContext
+}
+
+func (w *sessionWrapper) Run(ctx context.Context, cypher string, params map[string]any, configurers ...func(*neo4j.TransactionConfig)) (result, error) {
+	r, err := w.inner.Run(ctx, cypher, params, configurers...)
+	if err != nil {
+		return nil, err
+	}
+	return r, nil // ResultWithContext 满足 result 接口
+}
+
+func (w *sessionWrapper) Close(ctx context.Context) error {
+	return w.inner.Close(ctx)
+}
+
+// sessionFactory 是 session 创建函数的抽象点。
+// 生产环境：通过 sessionWrapper 包装 driver.NewSession。
+// 测试环境：替换为返回 mockSession 的函数。
+var sessionFactory func(ctx context.Context, driver neo4j.DriverWithContext, cfg neo4j.SessionConfig) session = func(ctx context.Context, d neo4j.DriverWithContext, cfg neo4j.SessionConfig) session {
+	return &sessionWrapper{inner: d.NewSession(ctx, cfg)}
+}
+
+// neo4jClient 实现 GraphDB 接口。
+// 持有 Neo4j 驱动实例和默认逻辑 DB 名。
+type neo4jClient struct {
+	driver    neo4j.DriverWithContext
+	defaultDB string
+}
+
+// NewNeo4jClient 根据配置创建 Neo4j 客户端。
+// 注意：创建时不会实际建立网络连接，需调用 Ping 验证连通性。
+// 返回类型为 *neo4jClient（非 GraphDB 接口），因为 I-07 只实现部分方法，
+// 待后续任务完成全部方法后再改为接口返回类型。
+func NewNeo4jClient(cfg config.Neo4JConfig) (*neo4jClient, error) {
+	driver, err := driverFactory(
+		cfg.URI,
+		neo4j.BasicAuth(cfg.User, cfg.Password, ""),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("create neo4j driver: %w", err)
+	}
+
+	slog.Info("neo4j client created", "uri", cfg.URI, "defaultDB", cfg.DefaultDB)
+
+	return &neo4jClient{
+		driver:    driver,
+		defaultDB: cfg.DefaultDB,
+	}, nil
+}
+
+// Ping 验证与 Neo4j 的连接连通性。
+// 实际建立网络连接并确认服务端可达。
+func (c *neo4jClient) Ping(ctx context.Context) error {
+	if err := c.driver.VerifyConnectivity(ctx); err != nil {
+		return fmt.Errorf("neo4j ping: %w", err)
+	}
+	return nil
+}
+
+// Close 关闭 Neo4j 驱动及其所有底层连接。
+// 使用 context.Background() 确保关闭操作不被外部 context 取消。
+func (c *neo4jClient) Close() error {
+	if err := c.driver.Close(context.Background()); err != nil {
+		return fmt.Errorf("neo4j close: %w", err)
+	}
+	slog.Info("neo4j client closed")
+	return nil
+}
+
+// Query 执行 Cypher 查询（驱动层自动注入 $_db）。
+// 创建 params 的副本并注入 _db，避免修改调用方的原始 map。
+func (c *neo4jClient) Query(ctx context.Context, db string, cypher string, params map[string]any) ([]map[string]any, error) {
+	merged := make(map[string]any, len(params)+1)
+	for k, v := range params {
+		merged[k] = v
+	}
+	merged["_db"] = db
+
+	sess := sessionFactory(ctx, c.driver, neo4j.SessionConfig{AccessMode: neo4j.AccessModeRead})
+	defer sess.Close(ctx)
+
+	res, err := sess.Run(ctx, cypher, merged)
+	if err != nil {
+		return nil, fmt.Errorf("run cypher: %w", err)
+	}
+
+	var records []map[string]any
+	for res.Next(ctx) {
+		record := res.Record()
+		row := make(map[string]any, len(record.Keys))
+		for _, key := range record.Keys {
+			val, _ := record.Get(key)
+			row[key] = val
+		}
+		records = append(records, row)
+	}
+	if err := res.Err(); err != nil {
+		return records, fmt.Errorf("iterate result: %w", err)
+	}
+	return records, nil
+}
+
+// ClearDB 清空指定逻辑 DB 的所有节点和关联关系。
+func (c *neo4jClient) ClearDB(ctx context.Context, db string) error {
+	sess := sessionFactory(ctx, c.driver, neo4j.SessionConfig{AccessMode: neo4j.AccessModeWrite})
+	defer sess.Close(ctx)
+
+	_, err := sess.Run(ctx, "MATCH (n {_db: $_db}) DETACH DELETE n", map[string]any{"_db": db})
+	if err != nil {
+		return fmt.Errorf("clear db %q: %w", db, err)
+	}
+	return nil
+}
+
+// ListDBs 列出所有逻辑 DB（通过扫描所有节点的 _db 属性去重）。
+func (c *neo4jClient) ListDBs(ctx context.Context) ([]string, error) {
+	sess := sessionFactory(ctx, c.driver, neo4j.SessionConfig{AccessMode: neo4j.AccessModeRead})
+	defer sess.Close(ctx)
+
+	res, err := sess.Run(ctx, "MATCH (n) WHERE n._db IS NOT NULL RETURN DISTINCT n._db AS db", nil)
+	if err != nil {
+		return nil, fmt.Errorf("list dbs: %w", err)
+	}
+
+	var dbs []string
+	for res.Next(ctx) {
+		if val, ok := res.Record().Get("db"); ok {
+			if s, ok := val.(string); ok {
+				dbs = append(dbs, s)
+			}
+		}
+	}
+	if err := res.Err(); err != nil {
+		return dbs, fmt.Errorf("iterate list dbs: %w", err)
+	}
+	return dbs, nil
+}
+
+// HasDB 判断指定逻辑 DB 是否存在数据。
+// 使用 count(n) > 0 避免全量扫描，配合 (_db, uri) 复合索引高效查询。
+func (c *neo4jClient) HasDB(ctx context.Context, db string) (bool, error) {
+	sess := sessionFactory(ctx, c.driver, neo4j.SessionConfig{AccessMode: neo4j.AccessModeRead})
+	defer sess.Close(ctx)
+
+	res, err := sess.Run(ctx, "MATCH (n {_db: $_db}) RETURN count(n) > 0 AS exists", map[string]any{"_db": db})
+	if err != nil {
+		return false, fmt.Errorf("has db %q: %w", db, err)
+	}
+
+	if res.Next(ctx) {
+		exists, _ := res.Record().Get("exists")
+		if b, ok := exists.(bool); ok {
+			return b, nil
+		}
+	}
+	if err := res.Err(); err != nil {
+		return false, fmt.Errorf("check has db %q: %w", db, err)
+	}
+	return false, nil
+}
+
+// 确保 driverFactory 类型签名与 neo4j.NewDriverWithContext 一致。
+// 这是编译时类型安全的文档性注释。
+var _ func(string, auth.TokenManager, ...func(*neo4j.Config)) (neo4j.DriverWithContext, error) = driverFactory

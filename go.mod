@@ -3,6 +3,7 @@ module gitlab.com/pml/network-digital-twin
 go 1.26.1
 
 require (
+	github.com/neo4j/neo4j-go-driver/v5 v5.28.4
 	github.com/spf13/viper v1.21.0
 	gopkg.in/yaml.v3 v3.0.1
 )

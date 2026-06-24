@@ -65,7 +65,10 @@ func (a *GraphAssembler) Assemble(resources []normalizer.NormalizedResource) (*G
 	// === 阶段 2: 关系推导 ===
 	var relations []Relation
 	for _, res := range resources {
-		et, _ := a.registry.GetEntityType(res.Kind)
+		et, err := a.registry.GetEntityType(res.Kind)
+		if err != nil {
+			return nil, nil, fmt.Errorf("get entity type %s: %w", res.Kind, err)
+		}
 		if len(et.Spec.RelationFields) == 0 {
 			continue
 		}
