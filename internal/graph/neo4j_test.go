@@ -1601,3 +1601,580 @@ func TestUpsert_MERGEsemantics(t *testing.T) {
 		t.Errorf("nodeData[0] should have 'props' at top level, got: %v", nodeData[0])
 	}
 }
+
+// ---------------------------------------------------------------------------
+// cloneDBCall — CloneDB 多步 session 捕获辅助结构体
+// ---------------------------------------------------------------------------
+
+// cloneDBCall 记录 CloneDB 执行过程中每次 Run 调用的 cypher 和 params。
+type cloneDBCall struct {
+	cypher string
+	params map[string]any
+}
+
+// cloneSessionFactory 为 CloneDB 测试构建 session 工厂。
+// 前 queryCount 次 Run 调用返回 queryResults 中对应的 mockResult（用于 Query 读阶段），
+// 后续 Run 调用记录到 writeCalls 并根据 writeErrFn 决定是否返回错误。
+type cloneSessionFactory struct {
+	queryCount   int
+	queryResults []*mockResult
+	writeCalls   *[]cloneDBCall
+	writeErrFn   func(callIndex int) error
+}
+
+// install 替换 sessionFactory 为测试专用工厂，测试结束自动恢复。
+func (f *cloneSessionFactory) install(t *testing.T) {
+	t.Helper()
+	orig := sessionFactory
+	runIdx := 0
+	sessionFactory = func(_ context.Context, _ neo4j.DriverWithContext, _ neo4j.SessionConfig) session {
+		return &mockSession{
+			runFn: func(_ context.Context, cypher string, params map[string]any, _ ...func(*neo4j.TransactionConfig)) (result, error) {
+				idx := runIdx
+				runIdx++
+				if idx < f.queryCount {
+					return f.queryResults[idx], nil
+				}
+				writeIdx := idx - f.queryCount
+				*f.writeCalls = append(*f.writeCalls, cloneDBCall{cypher: cypher, params: params})
+				if f.writeErrFn != nil {
+					if err := f.writeErrFn(writeIdx); err != nil {
+						return nil, err
+					}
+				}
+				return &mockResult{}, nil
+			},
+		}
+	}
+	t.Cleanup(func() { sessionFactory = orig })
+}
+
+// ---------------------------------------------------------------------------
+// TestDeleteByURIs — DeleteByURIs 方法测试
+// ---------------------------------------------------------------------------
+
+func TestDeleteByURIs_Success(t *testing.T) {
+	var calls []runCall
+	var accessMode neo4j.AccessMode
+	captureSessionFactory(t, &calls, &accessMode, nil)
+
+	client := newTestClient(t)
+	err := client.DeleteByURIs(context.Background(), "testdb", []string{"device:SN001", "device:SN002"})
+	if err != nil {
+		t.Fatalf("DeleteByURIs() unexpected error: %v", err)
+	}
+
+	// 应有 1 次 Run 调用
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 Run call, got %d", len(calls))
+	}
+
+	// 验证 AccessMode
+	if accessMode != neo4j.AccessModeWrite {
+		t.Errorf("AccessMode = %v, want Write", accessMode)
+	}
+
+	// 验证 Cypher
+	cypher := calls[0].cypher
+	if !strings.Contains(cypher, "UNWIND $uris AS uri") {
+		t.Errorf("cypher should contain 'UNWIND $uris AS uri', got: %s", cypher)
+	}
+	if !strings.Contains(cypher, "DETACH DELETE n") {
+		t.Errorf("cypher should contain 'DETACH DELETE n', got: %s", cypher)
+	}
+	if !strings.Contains(cypher, "{_db: $_db, uri: uri}") {
+		t.Errorf("cypher should contain '{_db: $_db, uri: uri}', got: %s", cypher)
+	}
+
+	// 验证 params
+	if calls[0].params["_db"] != "testdb" {
+		t.Errorf("params[_db] = %v, want 'testdb'", calls[0].params["_db"])
+	}
+	uris, ok := calls[0].params["uris"].([]string)
+	if !ok {
+		t.Fatalf("params[uris] should be []string, got: %T", calls[0].params["uris"])
+	}
+	if len(uris) != 2 || uris[0] != "device:SN001" || uris[1] != "device:SN002" {
+		t.Errorf("params[uris] = %v, want [device:SN001 device:SN002]", uris)
+	}
+}
+
+func TestDeleteByURIs_EmptyURIs(t *testing.T) {
+	var calls []runCall
+	captureSessionFactory(t, &calls, nil, nil)
+
+	client := newTestClient(t)
+	err := client.DeleteByURIs(context.Background(), "testdb", []string{})
+	if err != nil {
+		t.Fatalf("DeleteByURIs() unexpected error: %v", err)
+	}
+
+	// 空 URI 列表仍执行 1 次 Run（UNWIND 空列表 → 无操作）
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 Run call, got %d", len(calls))
+	}
+}
+
+func TestDeleteByURIs_WriteAccessMode(t *testing.T) {
+	var accessMode neo4j.AccessMode
+	orig := sessionFactory
+	sessionFactory = func(_ context.Context, _ neo4j.DriverWithContext, cfg neo4j.SessionConfig) session {
+		accessMode = cfg.AccessMode
+		return &mockSession{}
+	}
+	t.Cleanup(func() { sessionFactory = orig })
+
+	client := newTestClient(t)
+	_ = client.DeleteByURIs(context.Background(), "testdb", []string{"device:SN001"})
+
+	if accessMode != neo4j.AccessModeWrite {
+		t.Errorf("AccessMode = %v, want Write", accessMode)
+	}
+}
+
+func TestDeleteByURIs_RunError(t *testing.T) {
+	wantErr := errors.New("write failed")
+	captureSessionFactory(t, &[]runCall{}, nil, func(callIndex int) error {
+		return wantErr
+	})
+
+	client := newTestClient(t)
+	err := client.DeleteByURIs(context.Background(), "testdb", []string{"device:SN001"})
+	if err == nil {
+		t.Fatal("DeleteByURIs() should return error when Run fails")
+	}
+	if !strings.Contains(err.Error(), "delete by uris") {
+		t.Errorf("error should contain 'delete by uris', got: %v", err)
+	}
+	if !errors.Is(err, wantErr) {
+		t.Errorf("error should wrap original error, got: %v", err)
+	}
+}
+
+func TestDeleteByURIs_DETACHsemantics(t *testing.T) {
+	var calls []runCall
+	captureSessionFactory(t, &calls, nil, nil)
+
+	client := newTestClient(t)
+	_ = client.DeleteByURIs(context.Background(), "testdb", []string{"device:SN001"})
+
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 Run call, got %d", len(calls))
+	}
+	cypher := calls[0].cypher
+	// 必须含 DETACH DELETE
+	if !strings.Contains(cypher, "DETACH DELETE") {
+		t.Errorf("cypher should contain 'DETACH DELETE', got: %s", cypher)
+	}
+	// 不应含孤立的 DELETE n（即不含 DETACH DELETE n 但含 DELETE n）
+	// 通过检查 DELETE n 前面是否有 DETACH 来判断
+	if !strings.Contains(cypher, "DETACH DELETE n") {
+		t.Errorf("cypher should contain 'DETACH DELETE n' (not plain DELETE), got: %s", cypher)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// TestDeleteRelations — DeleteRelations 方法测试
+// ---------------------------------------------------------------------------
+
+func TestDeleteRelations_Success(t *testing.T) {
+	var calls []runCall
+	var accessMode neo4j.AccessMode
+	captureSessionFactory(t, &calls, &accessMode, nil)
+
+	client := newTestClient(t)
+	rels := []assembler.Relation{
+		{Type: "HAS_INTERFACE", From: "device:SN001", To: "iface:SN001_eth0"},
+	}
+
+	err := client.DeleteRelations(context.Background(), "testdb", rels)
+	if err != nil {
+		t.Fatalf("DeleteRelations() unexpected error: %v", err)
+	}
+
+	if accessMode != neo4j.AccessModeWrite {
+		t.Errorf("AccessMode = %v, want Write", accessMode)
+	}
+
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 Run call, got %d", len(calls))
+	}
+
+	// 验证 Cypher
+	cypher := calls[0].cypher
+	if !strings.Contains(cypher, "UNWIND $rels AS r") {
+		t.Errorf("cypher should contain 'UNWIND $rels AS r', got: %s", cypher)
+	}
+	if !strings.Contains(cypher, "MATCH (a {_db: $_db, uri: r.from})") {
+		t.Errorf("cypher should contain 'MATCH (a {_db: $_db, uri: r.from})', got: %s", cypher)
+	}
+	if !strings.Contains(cypher, "-[x:HAS_INTERFACE]->") {
+		t.Errorf("cypher should contain '-[x:HAS_INTERFACE]->', got: %s", cypher)
+	}
+	if !strings.Contains(cypher, "(b {_db: $_db, uri: r.to})") {
+		t.Errorf("cypher should contain '(b {_db: $_db, uri: r.to})', got: %s", cypher)
+	}
+	if !strings.Contains(cypher, "DELETE x") {
+		t.Errorf("cypher should contain 'DELETE x', got: %s", cypher)
+	}
+
+	// 验证 params
+	if calls[0].params["_db"] != "testdb" {
+		t.Errorf("params[_db] = %v, want 'testdb'", calls[0].params["_db"])
+	}
+	relData, ok := calls[0].params["rels"].([]map[string]any)
+	if !ok || len(relData) != 1 {
+		t.Fatalf("params[rels] should be []map[string]any with length 1, got: %v", calls[0].params["rels"])
+	}
+	if relData[0]["from"] != "device:SN001" {
+		t.Errorf("relData[0][from] = %v, want 'device:SN001'", relData[0]["from"])
+	}
+	if relData[0]["to"] != "iface:SN001_eth0" {
+		t.Errorf("relData[0][to] = %v, want 'iface:SN001_eth0'", relData[0]["to"])
+	}
+}
+
+func TestDeleteRelations_MultipleRelTypes(t *testing.T) {
+	var calls []runCall
+	captureSessionFactory(t, &calls, nil, nil)
+
+	client := newTestClient(t)
+	rels := []assembler.Relation{
+		{Type: "HAS_INTERFACE", From: "device:SN001", To: "iface:SN001_eth0"},
+		{Type: "CONNECTS_TO", From: "iface:SN001_eth0", To: "iface:SN002_eth0"},
+		{Type: "HAS_INTERFACE", From: "device:SN002", To: "iface:SN002_eth0"},
+	}
+
+	err := client.DeleteRelations(context.Background(), "testdb", rels)
+	if err != nil {
+		t.Fatalf("DeleteRelations() unexpected error: %v", err)
+	}
+
+	// 2 个 RelType 应产生 2 次 Run 调用
+	if len(calls) != 2 {
+		t.Fatalf("expected 2 Run calls (HAS_INTERFACE + CONNECTS_TO), got %d", len(calls))
+	}
+
+	foundHI := false
+	foundCT := false
+	for _, call := range calls {
+		if strings.Contains(call.cypher, "-[x:HAS_INTERFACE]->") {
+			foundHI = true
+			rd := call.params["rels"].([]map[string]any)
+			if len(rd) != 2 {
+				t.Errorf("HAS_INTERFACE group should have 2 rels, got %d", len(rd))
+			}
+		}
+		if strings.Contains(call.cypher, "-[x:CONNECTS_TO]->") {
+			foundCT = true
+			rd := call.params["rels"].([]map[string]any)
+			if len(rd) != 1 {
+				t.Errorf("CONNECTS_TO group should have 1 rel, got %d", len(rd))
+			}
+		}
+	}
+	if !foundHI {
+		t.Error("expected HAS_INTERFACE rel cypher not found")
+	}
+	if !foundCT {
+		t.Error("expected CONNECTS_TO rel cypher not found")
+	}
+}
+
+func TestDeleteRelations_EmptyRels(t *testing.T) {
+	var calls []runCall
+	captureSessionFactory(t, &calls, nil, nil)
+
+	client := newTestClient(t)
+	err := client.DeleteRelations(context.Background(), "testdb", nil)
+	if err != nil {
+		t.Fatalf("DeleteRelations() unexpected error: %v", err)
+	}
+
+	// 空关系列表不执行任何 Run
+	if len(calls) != 0 {
+		t.Fatalf("expected 0 Run calls for empty rels, got %d", len(calls))
+	}
+}
+
+func TestDeleteRelations_RunError(t *testing.T) {
+	wantErr := errors.New("delete failed")
+	captureSessionFactory(t, &[]runCall{}, nil, func(callIndex int) error {
+		return wantErr
+	})
+
+	client := newTestClient(t)
+	rels := []assembler.Relation{
+		{Type: "HAS_INTERFACE", From: "device:SN001", To: "iface:SN001_eth0"},
+	}
+
+	err := client.DeleteRelations(context.Background(), "testdb", rels)
+	if err == nil {
+		t.Fatal("DeleteRelations() should return error when Run fails")
+	}
+	if !strings.Contains(err.Error(), "delete rels") {
+		t.Errorf("error should contain 'delete rels', got: %v", err)
+	}
+	if !errors.Is(err, wantErr) {
+		t.Errorf("error should wrap original error, got: %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// TestCloneDB — CloneDB 方法测试
+// ---------------------------------------------------------------------------
+
+func TestCloneDB_Success(t *testing.T) {
+	var writeCalls []cloneDBCall
+	f := &cloneSessionFactory{
+		queryCount: 2,
+		queryResults: []*mockResult{
+			{
+				records: []*neo4j.Record{
+					{Keys: []string{"labels", "uri", "props"}, Values: []any{[]string{"Device"}, "device:SN001", map[string]any{"hostname": "r1", "_db": "snap1"}}},
+					{Keys: []string{"labels", "uri", "props"}, Values: []any{[]string{"Interface"}, "iface:eth0", map[string]any{"status": "Up", "_db": "snap1"}}},
+				},
+			},
+			{
+				records: []*neo4j.Record{
+					{Keys: []string{"type", "from", "to"}, Values: []any{"HAS_INTERFACE", "device:SN001", "iface:eth0"}},
+				},
+			},
+		},
+		writeCalls: &writeCalls,
+	}
+	f.install(t)
+
+	client := newTestClient(t)
+	err := client.CloneDB(context.Background(), "snap1", "default")
+	if err != nil {
+		t.Fatalf("CloneDB() unexpected error: %v", err)
+	}
+
+	// 写入阶段应有 2 次 Run：1 节点 + 1 关系（2 个不同 Label 可能 2 次节点写入）
+	if len(writeCalls) < 2 {
+		t.Fatalf("expected at least 2 write calls (2 node labels + 1 rel), got %d", len(writeCalls))
+	}
+
+	// 验证节点写入 Cypher
+	foundDevice := false
+	foundIface := false
+	foundRel := false
+	for _, call := range writeCalls {
+		if strings.Contains(call.cypher, ":Device") {
+			foundDevice = true
+			if !strings.Contains(call.cypher, "CREATE (x:Device") {
+				t.Errorf("device cypher should contain CREATE, got: %s", call.cypher)
+			}
+			if !strings.Contains(call.cypher, "_db: $to") {
+				t.Errorf("cypher should use $to for _db, got: %s", call.cypher)
+			}
+			if call.params["to"] != "default" {
+				t.Errorf("params[to] = %v, want 'default'", call.params["to"])
+			}
+		}
+		if strings.Contains(call.cypher, ":Interface") {
+			foundIface = true
+		}
+		if strings.Contains(call.cypher, "[:HAS_INTERFACE]") {
+			foundRel = true
+			if !strings.Contains(call.cypher, "MATCH (a {_db: $to") {
+				t.Errorf("rel cypher should use $to for _db, got: %s", call.cypher)
+			}
+			if !strings.Contains(call.cypher, "CREATE (a)-[:HAS_INTERFACE]->(b)") {
+				t.Errorf("rel cypher should CREATE relation, got: %s", call.cypher)
+			}
+		}
+	}
+	if !foundDevice {
+		t.Error("expected Device node write cypher not found")
+	}
+	if !foundIface {
+		t.Error("expected Interface node write cypher not found")
+	}
+	if !foundRel {
+		t.Error("expected HAS_INTERFACE rel write cypher not found")
+	}
+}
+
+func TestCloneDB_EmptySource(t *testing.T) {
+	var writeCalls []cloneDBCall
+	f := &cloneSessionFactory{
+		queryCount: 2,
+		queryResults: []*mockResult{
+			{}, // 空节点
+			{}, // 空关系
+		},
+		writeCalls: &writeCalls,
+	}
+	f.install(t)
+
+	client := newTestClient(t)
+	err := client.CloneDB(context.Background(), "empty-snap", "default")
+	if err != nil {
+		t.Fatalf("CloneDB() unexpected error: %v", err)
+	}
+
+	// 源 DB 无数据，不应有任何写入
+	if len(writeCalls) != 0 {
+		t.Errorf("expected 0 write calls for empty source, got %d", len(writeCalls))
+	}
+}
+
+func TestCloneDB_NodeQueryError(t *testing.T) {
+	wantErr := errors.New("query failed")
+	f := &cloneSessionFactory{
+		queryCount: 2,
+		queryResults: []*mockResult{
+			{err: wantErr}, // 节点查询失败
+		},
+		writeCalls: &[]cloneDBCall{},
+	}
+	f.install(t)
+
+	client := newTestClient(t)
+	err := client.CloneDB(context.Background(), "snap1", "default")
+	if err == nil {
+		t.Fatal("CloneDB() should return error when node query fails")
+	}
+	if !strings.Contains(err.Error(), "clone db query nodes") {
+		t.Errorf("error should contain 'clone db query nodes', got: %v", err)
+	}
+	if !errors.Is(err, wantErr) {
+		t.Errorf("error should wrap original error, got: %v", err)
+	}
+}
+
+func TestCloneDB_RelQueryError(t *testing.T) {
+	wantErr := errors.New("rel query failed")
+	f := &cloneSessionFactory{
+		queryCount: 2,
+		queryResults: []*mockResult{
+			{records: []*neo4j.Record{}}, // 节点查询成功（空）
+			{err: wantErr},               // 关系查询失败
+		},
+		writeCalls: &[]cloneDBCall{},
+	}
+	f.install(t)
+
+	client := newTestClient(t)
+	err := client.CloneDB(context.Background(), "snap1", "default")
+	if err == nil {
+		t.Fatal("CloneDB() should return error when rel query fails")
+	}
+	if !strings.Contains(err.Error(), "clone db query rels") {
+		t.Errorf("error should contain 'clone db query rels', got: %v", err)
+	}
+	if !errors.Is(err, wantErr) {
+		t.Errorf("error should wrap original error, got: %v", err)
+	}
+}
+
+func TestCloneDB_NodeWriteError(t *testing.T) {
+	wantErr := errors.New("write failed")
+	f := &cloneSessionFactory{
+		queryCount: 2,
+		queryResults: []*mockResult{
+			{
+				records: []*neo4j.Record{
+					{Keys: []string{"labels", "uri", "props"}, Values: []any{[]string{"Device"}, "device:SN001", map[string]any{"hostname": "r1"}}},
+				},
+			},
+			{records: []*neo4j.Record{}}, // 空关系
+		},
+		writeCalls: &[]cloneDBCall{},
+		writeErrFn: func(callIndex int) error {
+			return wantErr
+		},
+	}
+	f.install(t)
+
+	client := newTestClient(t)
+	err := client.CloneDB(context.Background(), "snap1", "default")
+	if err == nil {
+		t.Fatal("CloneDB() should return error when node write fails")
+	}
+	if !strings.Contains(err.Error(), "clone db create nodes") {
+		t.Errorf("error should contain 'clone db create nodes', got: %v", err)
+	}
+	if !errors.Is(err, wantErr) {
+		t.Errorf("error should wrap original error, got: %v", err)
+	}
+}
+
+func TestCloneDB_DBPropertyOverride(t *testing.T) {
+	var writeCalls []cloneDBCall
+	f := &cloneSessionFactory{
+		queryCount: 2,
+		queryResults: []*mockResult{
+			{
+				records: []*neo4j.Record{
+					{Keys: []string{"labels", "uri", "props"}, Values: []any{[]string{"Device"}, "device:SN001", map[string]any{"hostname": "r1", "_db": "snap1"}}},
+				},
+			},
+			{records: []*neo4j.Record{}}, // 空关系
+		},
+		writeCalls: &writeCalls,
+	}
+	f.install(t)
+
+	client := newTestClient(t)
+	_ = client.CloneDB(context.Background(), "snap1", "default")
+
+	// 验证写入 params 使用 $to 而非 $from
+	for _, call := range writeCalls {
+		if !strings.Contains(call.cypher, "UNWIND $nodes") {
+			continue
+		}
+		if call.params["to"] != "default" {
+			t.Errorf("params[to] = %v, want 'default'", call.params["to"])
+		}
+		// 验证 Cypher 使用 $to 设置 _db
+		if !strings.Contains(call.cypher, "_db: $to") {
+			t.Errorf("cypher should use $to for _db override, got: %s", call.cypher)
+		}
+		// nodeData 中的 props 的 _db 应该是 "default"
+		nd, ok := call.params["nodes"].([]map[string]any)
+		if !ok || len(nd) == 0 {
+			continue
+		}
+		props, ok := nd[0]["props"].(map[string]any)
+		if ok {
+			if props["_db"] != "default" {
+				t.Errorf("node props[_db] = %v, want 'default' (overridden from source)", props["_db"])
+			}
+		}
+	}
+}
+
+func TestCloneDB_SessionClosed(t *testing.T) {
+	closeCalled := false
+	orig := sessionFactory
+	callIdx := 0
+	sessionFactory = func(_ context.Context, _ neo4j.DriverWithContext, _ neo4j.SessionConfig) session {
+		idx := callIdx
+		callIdx++
+		return &mockSession{
+			runFn: func(_ context.Context, _ string, _ map[string]any, _ ...func(*neo4j.TransactionConfig)) (result, error) {
+				if idx < 2 {
+					return &mockResult{}, nil // Query 阶段返回空
+				}
+				return &mockResult{}, nil
+			},
+			closeFn: func(_ context.Context) error {
+				if idx >= 2 { // 写阶段的 session
+					closeCalled = true
+				}
+				return nil
+			},
+		}
+	}
+	t.Cleanup(func() { sessionFactory = orig })
+
+	client := newTestClient(t)
+	_ = client.CloneDB(context.Background(), "snap1", "default")
+
+	if !closeCalled {
+		t.Error("CloneDB() should call session.Close via defer")
+	}
+}

@@ -347,3 +347,175 @@ func (c *neo4jClient) Upsert(ctx context.Context, db string, nodes []assembler.N
 	slog.Info("upsert completed", "db", db, "node_labels", len(groupNodesByLabel(nodes)), "rel_types", len(groupRelsByType(rels)))
 	return nil
 }
+
+// DeleteByURIs 按 URI 删除节点及其关联关系（DETACH DELETE）。
+// DETACH DELETE 自动删除节点的所有入边和出边，避免留下悬空关系。
+// 对不存在的 URI 不报错（MATCH 不到则跳过）。
+func (c *neo4jClient) DeleteByURIs(ctx context.Context, db string, uris []string) error {
+	sess := sessionFactory(ctx, c.driver, neo4j.SessionConfig{AccessMode: neo4j.AccessModeWrite})
+	defer sess.Close(ctx)
+
+	params := map[string]any{"_db": db, "uris": uris}
+	cypher := "UNWIND $uris AS uri MATCH (n {_db: $_db, uri: uri}) DETACH DELETE n"
+
+	if _, err := sess.Run(ctx, cypher, params); err != nil {
+		return fmt.Errorf("delete by uris: %w", err)
+	}
+
+	slog.Info("delete by uris completed", "db", db, "count", len(uris))
+	return nil
+}
+
+// DeleteRelations 仅删除指定关系而不影响节点。
+// 按 RelType 分组执行 MATCH + DELETE，精确匹配 (a)-[x:Type]->(b) 后只删除关系 x。
+// 对 MATCH 不到的关系不报错（跳过）。
+func (c *neo4jClient) DeleteRelations(ctx context.Context, db string, rels []assembler.Relation) error {
+	sess := sessionFactory(ctx, c.driver, neo4j.SessionConfig{AccessMode: neo4j.AccessModeWrite})
+	defer sess.Close(ctx)
+
+	for relType, group := range groupRelsByType(rels) {
+		relData := make([]map[string]any, 0, len(group))
+		for _, r := range group {
+			relData = append(relData, map[string]any{
+				"from": r.From,
+				"to":   r.To,
+			})
+		}
+
+		params := map[string]any{
+			"_db":  db,
+			"rels": relData,
+		}
+		cypher := fmt.Sprintf(
+			"UNWIND $rels AS r MATCH (a {_db: $_db, uri: r.from})-[x:%s]->(b {_db: $_db, uri: r.to}) DELETE x",
+			relType,
+		)
+		if _, err := sess.Run(ctx, cypher, params); err != nil {
+			return fmt.Errorf("delete rels %s: %w", relType, err)
+		}
+	}
+
+	slog.Info("delete relations completed", "db", db, "rel_types", len(groupRelsByType(rels)))
+	return nil
+}
+
+// groupCloneNodesByLabel 将 Query 返回的节点记录按 Label 分组。
+// 每条记录的 labels 字段是 []string，取第一个元素作为 Label。
+func groupCloneNodesByLabel(nodes []map[string]any) map[string][]map[string]any {
+	groups := make(map[string][]map[string]any)
+	for _, n := range nodes {
+		labels, ok := n["labels"].([]string)
+		if !ok || len(labels) == 0 {
+			// 尝试 []any 类型（Neo4j 驱动可能返回此类型）
+			if anyLabels, ok := n["labels"].([]any); ok && len(anyLabels) > 0 {
+				if label, ok := anyLabels[0].(string); ok {
+					groups[label] = append(groups[label], n)
+				}
+			}
+			continue
+		}
+		groups[labels[0]] = append(groups[labels[0]], n)
+	}
+	return groups
+}
+
+// groupCloneRelsByType 将 Query 返回的关系记录按 type 分组。
+func groupCloneRelsByType(rels []map[string]any) map[string][]map[string]any {
+	groups := make(map[string][]map[string]any)
+	for _, r := range rels {
+		relType, _ := r["type"].(string)
+		if relType == "" {
+			continue
+		}
+		groups[relType] = append(groups[relType], r)
+	}
+	return groups
+}
+
+// CloneDB 将一个逻辑 DB 完整复制到另一个（用于快照恢复）。
+// 两阶段实现：
+//  1. 读阶段：通过 Query 读取源 DB 的所有节点和关系
+//  2. 写阶段：按 Label/RelType 分组写入目标 DB
+//
+// 调用方负责先 ClearDB 目标 DB，本方法不做清理。
+func (c *neo4jClient) CloneDB(ctx context.Context, from, to string) error {
+	// === 阶段 1: 读源 DB ===
+	nodeRecords, err := c.Query(ctx, from,
+		"MATCH (n {_db: $_db}) RETURN labels(n) AS labels, n.uri AS uri, properties(n) AS props",
+		nil,
+	)
+	if err != nil {
+		return fmt.Errorf("clone db query nodes: %w", err)
+	}
+
+	relRecords, err := c.Query(ctx, from,
+		"MATCH (a {_db: $_db})-[r]->(b {_db: $_db}) RETURN type(r) AS type, a.uri AS from, b.uri AS to",
+		nil,
+	)
+	if err != nil {
+		return fmt.Errorf("clone db query rels: %w", err)
+	}
+
+	// === 阶段 2: 写入目标 DB ===
+	sess := sessionFactory(ctx, c.driver, neo4j.SessionConfig{AccessMode: neo4j.AccessModeWrite})
+	defer sess.Close(ctx)
+
+	// 按 Label 分组写入节点
+	nodeGroups := groupCloneNodesByLabel(nodeRecords)
+	for label, group := range nodeGroups {
+		nodeData := make([]map[string]any, 0, len(group))
+		for _, n := range group {
+			uri, _ := n["uri"].(string)
+			props, _ := n["props"].(map[string]any)
+			if props == nil {
+				props = make(map[string]any)
+			}
+			// 复制 props 并覆盖 _db 为目标 DB
+			newProps := make(map[string]any, len(props)+1)
+			for k, v := range props {
+				newProps[k] = v
+			}
+			newProps["_db"] = to
+			nodeData = append(nodeData, map[string]any{
+				"uri":   uri,
+				"props": newProps,
+			})
+		}
+
+		params := map[string]any{"to": to, "nodes": nodeData}
+		cypher := fmt.Sprintf(
+			"UNWIND $nodes AS n CREATE (x:%s {_db: $to, uri: n.uri}) SET x += n.props",
+			label,
+		)
+		if _, err := sess.Run(ctx, cypher, params); err != nil {
+			return fmt.Errorf("clone db create nodes %s: %w", label, err)
+		}
+	}
+
+	// 按 RelType 分组写入关系
+	relGroups := groupCloneRelsByType(relRecords)
+	for relType, group := range relGroups {
+		relData := make([]map[string]any, 0, len(group))
+		for _, r := range group {
+			from, _ := r["from"].(string)
+			toURI, _ := r["to"].(string)
+			relData = append(relData, map[string]any{
+				"from": from,
+				"to":   toURI,
+			})
+		}
+
+		params := map[string]any{"to": to, "rels": relData}
+		cypher := fmt.Sprintf(
+			"UNWIND $rels AS r MATCH (a {_db: $to, uri: r.from}) MATCH (b {_db: $to, uri: r.to}) CREATE (a)-[:%s]->(b)",
+			relType,
+		)
+		if _, err := sess.Run(ctx, cypher, params); err != nil {
+			return fmt.Errorf("clone db create rels %s: %w", relType, err)
+		}
+	}
+
+	slog.Info("clone db completed", "from", from, "to", to,
+		"nodes", len(nodeRecords), "rels", len(relRecords))
+	return nil
+}
