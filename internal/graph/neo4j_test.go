@@ -2178,3 +2178,329 @@ func TestCloneDB_SessionClosed(t *testing.T) {
 		t.Error("CloneDB() should call session.Close via defer")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// TestBuildCypher — BuildCypher 方法测试
+// ---------------------------------------------------------------------------
+
+func TestBuildCypher_Create(t *testing.T) {
+	client := newTestClient(t)
+	nodes := []assembler.Node{
+		{Label: "Device", URI: "device:SN001", Props: map[string]any{"hostname": "r1"}},
+	}
+
+	cypher, params := client.BuildCypher("create", "testdb", nodes, nil, nil)
+
+	if !strings.Contains(cypher, "UNWIND $nodes_Device AS n") {
+		t.Errorf("cypher should contain 'UNWIND $nodes_Device AS n', got: %s", cypher)
+	}
+	if !strings.Contains(cypher, "CREATE (x:Device") {
+		t.Errorf("cypher should contain 'CREATE (x:Device', got: %s", cypher)
+	}
+	if !strings.Contains(cypher, "_db: $_db") {
+		t.Errorf("cypher should contain '_db: $_db', got: %s", cypher)
+	}
+	if params["_db"] != "testdb" {
+		t.Errorf("params[_db] = %v, want 'testdb'", params["_db"])
+	}
+	if _, ok := params["nodes_Device"]; !ok {
+		t.Errorf("params should contain 'nodes_Device' key, got: %v", params)
+	}
+}
+
+func TestBuildCypher_Upsert(t *testing.T) {
+	client := newTestClient(t)
+	nodes := []assembler.Node{
+		{Label: "Device", URI: "device:SN001", Props: map[string]any{"hostname": "r1"}},
+	}
+
+	cypher, params := client.BuildCypher("upsert", "testdb", nodes, nil, nil)
+
+	if !strings.Contains(cypher, "MERGE (x:Device") {
+		t.Errorf("cypher should contain 'MERGE (x:Device', got: %s", cypher)
+	}
+	if !strings.Contains(cypher, "SET x += n.props") {
+		t.Errorf("cypher should contain 'SET x += n.props', got: %s", cypher)
+	}
+	if params["_db"] != "testdb" {
+		t.Errorf("params[_db] = %v, want 'testdb'", params["_db"])
+	}
+	if _, ok := params["nodes_Device"]; !ok {
+		t.Errorf("params should contain 'nodes_Device' key, got: %v", params)
+	}
+}
+
+func TestBuildCypher_Delete(t *testing.T) {
+	client := newTestClient(t)
+	uris := []string{"device:SN001", "device:SN002"}
+
+	cypher, params := client.BuildCypher("delete", "testdb", nil, nil, uris)
+
+	if !strings.Contains(cypher, "UNWIND $uris AS uri") {
+		t.Errorf("cypher should contain 'UNWIND $uris AS uri', got: %s", cypher)
+	}
+	if !strings.Contains(cypher, "DETACH DELETE n") {
+		t.Errorf("cypher should contain 'DETACH DELETE n', got: %s", cypher)
+	}
+	if params["_db"] != "testdb" {
+		t.Errorf("params[_db] = %v, want 'testdb'", params["_db"])
+	}
+	pUris, ok := params["uris"].([]string)
+	if !ok || len(pUris) != 2 {
+		t.Errorf("params[uris] should be []string with length 2, got: %v", params["uris"])
+	}
+}
+
+func TestBuildCypher_DeleteRelations(t *testing.T) {
+	client := newTestClient(t)
+	rels := []assembler.Relation{
+		{Type: "HAS_INTERFACE", From: "device:SN001", To: "iface:SN001_eth0"},
+	}
+
+	cypher, params := client.BuildCypher("delete_relations", "testdb", nil, rels, nil)
+
+	if !strings.Contains(cypher, "UNWIND $rels_HAS_INTERFACE AS r") {
+		t.Errorf("cypher should contain 'UNWIND $rels_HAS_INTERFACE AS r', got: %s", cypher)
+	}
+	if !strings.Contains(cypher, "-[x:HAS_INTERFACE]->") {
+		t.Errorf("cypher should contain '-[x:HAS_INTERFACE]->', got: %s", cypher)
+	}
+	if !strings.Contains(cypher, "DELETE x") {
+		t.Errorf("cypher should contain 'DELETE x', got: %s", cypher)
+	}
+	if params["_db"] != "testdb" {
+		t.Errorf("params[_db] = %v, want 'testdb'", params["_db"])
+	}
+	if _, ok := params["rels_HAS_INTERFACE"]; !ok {
+		t.Errorf("params should contain 'rels_HAS_INTERFACE' key, got: %v", params)
+	}
+}
+
+func TestBuildCypher_UnknownAction(t *testing.T) {
+	client := newTestClient(t)
+
+	cypher, params := client.BuildCypher("unknown", "testdb", nil, nil, nil)
+
+	if cypher != "" {
+		t.Errorf("cypher should be empty for unknown action, got: %s", cypher)
+	}
+	if params["_db"] != "testdb" {
+		t.Errorf("params[_db] = %v, want 'testdb'", params["_db"])
+	}
+	// 仅含 _db
+	if len(params) != 1 {
+		t.Errorf("params should only contain _db, got: %v", params)
+	}
+}
+
+func TestBuildCypher_MultipleLabels(t *testing.T) {
+	client := newTestClient(t)
+	nodes := []assembler.Node{
+		{Label: "Device", URI: "device:SN001", Props: map[string]any{"hostname": "r1"}},
+		{Label: "Interface", URI: "iface:SN001_eth0", Props: map[string]any{"status": "Up"}},
+	}
+
+	cypher, params := client.BuildCypher("create", "testdb", nodes, nil, nil)
+
+	// 多 Label 应产生多条 Cypher 语句，用 ;\n 分隔
+	if !strings.Contains(cypher, ";\n") {
+		t.Errorf("cypher should contain ';\\n' separator for multiple labels, got: %s", cypher)
+	}
+	if !strings.Contains(cypher, ":Device") {
+		t.Errorf("cypher should contain ':Device', got: %s", cypher)
+	}
+	if !strings.Contains(cypher, ":Interface") {
+		t.Errorf("cypher should contain ':Interface', got: %s", cypher)
+	}
+	if _, ok := params["nodes_Device"]; !ok {
+		t.Errorf("params should contain 'nodes_Device' key")
+	}
+	if _, ok := params["nodes_Interface"]; !ok {
+		t.Errorf("params should contain 'nodes_Interface' key")
+	}
+}
+
+func TestBuildCypher_DBParamPresent(t *testing.T) {
+	client := newTestClient(t)
+	nodes := []assembler.Node{
+		{Label: "Device", URI: "device:A", Props: map[string]any{"hostname": "r1"}},
+	}
+	rels := []assembler.Relation{
+		{Type: "HAS_INTERFACE", From: "device:A", To: "iface:eth0"},
+	}
+	uris := []string{"device:A"}
+
+	actions := []string{"create", "upsert", "delete", "delete_relations"}
+	for _, action := range actions {
+		_, params := client.BuildCypher(action, "mydb", nodes, rels, uris)
+		if params["_db"] != "mydb" {
+			t.Errorf("BuildCypher(%q) params[_db] = %v, want 'mydb'", action, params["_db"])
+		}
+	}
+}
+
+func TestBuildCypher_EmptyInput(t *testing.T) {
+	client := newTestClient(t)
+
+	// 所有 action 传入空数据不应 panic
+	actions := []string{"create", "upsert", "delete", "delete_relations"}
+	for _, action := range actions {
+		cypher, params := client.BuildCypher(action, "testdb", nil, nil, nil)
+		_ = cypher
+		if params == nil {
+			t.Errorf("BuildCypher(%q) params should not be nil", action)
+		}
+	}
+}
+
+func TestBuildCypher_ParamsKeyFormat(t *testing.T) {
+	client := newTestClient(t)
+	nodes := []assembler.Node{
+		{Label: "Device", URI: "device:A"},
+		{Label: "Device", URI: "device:B"},
+	}
+
+	_, params := client.BuildCypher("create", "testdb", nodes, nil, nil)
+
+	// key 应为 "nodes_Device" 格式
+	nd, ok := params["nodes_Device"].([]map[string]any)
+	if !ok {
+		t.Fatalf("params[nodes_Device] should be []map[string]any, got: %T", params["nodes_Device"])
+	}
+	if len(nd) != 2 {
+		t.Errorf("params[nodes_Device] length = %d, want 2", len(nd))
+	}
+}
+
+func TestBuildCypher_NoSession(t *testing.T) {
+	// BuildCypher 是纯函数，不应调用 sessionFactory
+	// 通过替换 sessionFactory 为 panic 函数来验证
+	orig := sessionFactory
+	sessionFactory = func(_ context.Context, _ neo4j.DriverWithContext, _ neo4j.SessionConfig) session {
+		panic("BuildCypher should NOT call sessionFactory")
+	}
+	t.Cleanup(func() { sessionFactory = orig })
+
+	client := newTestClient(t)
+	nodes := []assembler.Node{
+		{Label: "Device", URI: "device:A"},
+	}
+	rels := []assembler.Relation{
+		{Type: "HAS_INTERFACE", From: "device:A", To: "iface:eth0"},
+	}
+
+	// 调用所有 action，都不应 panic
+	for _, action := range []string{"create", "upsert", "delete", "delete_relations"} {
+		cypher, params := client.BuildCypher(action, "testdb", nodes, rels, []string{"device:A"})
+		_ = cypher
+		_ = params
+	}
+}
+
+// ---------------------------------------------------------------------------
+// TestEnsureIndexes — EnsureIndexes 方法测试
+// ---------------------------------------------------------------------------
+
+func TestEnsureIndexes_Success(t *testing.T) {
+	var calls []runCall
+	captureSessionFactory(t, &calls, nil, nil)
+
+	client := newTestClient(t)
+	labels := []string{"Device", "Interface"}
+
+	err := client.EnsureIndexes(context.Background(), labels)
+	if err != nil {
+		t.Fatalf("EnsureIndexes() unexpected error: %v", err)
+	}
+
+	if len(calls) != 2 {
+		t.Fatalf("expected 2 Run calls for 2 labels, got %d", len(calls))
+	}
+
+	for _, call := range calls {
+		if !strings.Contains(call.cypher, "CREATE INDEX") {
+			t.Errorf("cypher should contain 'CREATE INDEX', got: %s", call.cypher)
+		}
+		if !strings.Contains(call.cypher, "IF NOT EXISTS") {
+			t.Errorf("cypher should contain 'IF NOT EXISTS', got: %s", call.cypher)
+		}
+		if !strings.Contains(call.cypher, "ON (n._db, n.uri)") {
+			t.Errorf("cypher should contain 'ON (n._db, n.uri)', got: %s", call.cypher)
+		}
+	}
+
+	// 验证索引名格式
+	foundDevice := false
+	foundInterface := false
+	for _, call := range calls {
+		if strings.Contains(call.cypher, "idx_device_db_uri") {
+			foundDevice = true
+			if !strings.Contains(call.cypher, "FOR (n:Device)") {
+				t.Errorf("cypher should contain 'FOR (n:Device)', got: %s", call.cypher)
+			}
+		}
+		if strings.Contains(call.cypher, "idx_interface_db_uri") {
+			foundInterface = true
+			if !strings.Contains(call.cypher, "FOR (n:Interface)") {
+				t.Errorf("cypher should contain 'FOR (n:Interface)', got: %s", call.cypher)
+			}
+		}
+	}
+	if !foundDevice {
+		t.Error("expected Device index cypher not found")
+	}
+	if !foundInterface {
+		t.Error("expected Interface index cypher not found")
+	}
+}
+
+func TestEnsureIndexes_Idempotent(t *testing.T) {
+	var calls []runCall
+	captureSessionFactory(t, &calls, nil, nil)
+
+	client := newTestClient(t)
+	_ = client.EnsureIndexes(context.Background(), []string{"Device"})
+
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 Run call, got %d", len(calls))
+	}
+	// 验证幂等性：Cypher 含 IF NOT EXISTS
+	if !strings.Contains(calls[0].cypher, "IF NOT EXISTS") {
+		t.Errorf("cypher should contain 'IF NOT EXISTS' for idempotency, got: %s", calls[0].cypher)
+	}
+}
+
+func TestEnsureIndexes_EmptyLabels(t *testing.T) {
+	var calls []runCall
+	captureSessionFactory(t, &calls, nil, nil)
+
+	client := newTestClient(t)
+	err := client.EnsureIndexes(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("EnsureIndexes() unexpected error: %v", err)
+	}
+
+	// 空 labels 不应执行任何 Run
+	if len(calls) != 0 {
+		t.Errorf("expected 0 Run calls for empty labels, got %d", len(calls))
+	}
+}
+
+func TestEnsureIndexes_RunError(t *testing.T) {
+	wantErr := errors.New("index creation failed")
+	captureSessionFactory(t, &[]runCall{}, nil, func(callIndex int) error {
+		return wantErr
+	})
+
+	client := newTestClient(t)
+	err := client.EnsureIndexes(context.Background(), []string{"Device"})
+	if err == nil {
+		t.Fatal("EnsureIndexes() should return error when Run fails")
+	}
+	if !strings.Contains(err.Error(), "ensure indexes") {
+		t.Errorf("error should contain 'ensure indexes', got: %v", err)
+	}
+	if !errors.Is(err, wantErr) {
+		t.Errorf("error should wrap original error, got: %v", err)
+	}
+}

@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j/auth"
@@ -517,5 +518,98 @@ func (c *neo4jClient) CloneDB(ctx context.Context, from, to string) error {
 
 	slog.Info("clone db completed", "from", from, "to", to,
 		"nodes", len(nodeRecords), "rels", len(relRecords))
+	return nil
+}
+
+// BuildCypher 预览生成的 Cypher 语句（不执行），用于测试/audit/调试。
+// 纯函数：不创建 session，不访问数据库，只返回 Cypher 字符串 + params。
+// action 支持: "create", "upsert", "delete", "delete_relations"。
+// 多 Label/RelType 时返回多条 Cypher 用 ";\n" 分隔，仅供预览。
+// params key 使用 nodes_{Label} / rels_{Type} 格式，避免多 Label 时 key 冲突。
+func (c *neo4jClient) BuildCypher(action string, db string, nodes []assembler.Node, rels []assembler.Relation, uris []string) (string, map[string]any) {
+	params := map[string]any{"_db": db}
+
+	switch action {
+	case "create":
+		nodeGroups := groupNodesByLabel(nodes)
+		var cyphers []string
+		for label, group := range nodeGroups {
+			nodeData := make([]map[string]any, 0, len(group))
+			for _, n := range group {
+				nodeData = append(nodeData, map[string]any{"uri": n.URI, "props": n.Props})
+			}
+			params["nodes_"+label] = nodeData
+			cyphers = append(cyphers, fmt.Sprintf(
+				"UNWIND $nodes_%s AS n CREATE (x:%s {_db: $_db, uri: n.uri}) SET x += n.props",
+				label, label,
+			))
+		}
+		return strings.Join(cyphers, ";\n"), params
+
+	case "upsert":
+		nodeGroups := groupNodesByLabel(nodes)
+		var cyphers []string
+		for label, group := range nodeGroups {
+			nodeData := make([]map[string]any, 0, len(group))
+			for _, n := range group {
+				nodeData = append(nodeData, map[string]any{"uri": n.URI, "props": n.Props})
+			}
+			params["nodes_"+label] = nodeData
+			cyphers = append(cyphers, fmt.Sprintf(
+				"UNWIND $nodes_%s AS n MERGE (x:%s {_db: $_db, uri: n.uri}) SET x += n.props",
+				label, label,
+			))
+		}
+		return strings.Join(cyphers, ";\n"), params
+
+	case "delete":
+		params["uris"] = uris
+		return "UNWIND $uris AS uri MATCH (n {_db: $_db, uri: uri}) DETACH DELETE n", params
+
+	case "delete_relations":
+		relGroups := groupRelsByType(rels)
+		var cyphers []string
+		for relType, group := range relGroups {
+			relData := make([]map[string]any, 0, len(group))
+			for _, r := range group {
+				relData = append(relData, map[string]any{"from": r.From, "to": r.To})
+			}
+			params["rels_"+relType] = relData
+			cyphers = append(cyphers, fmt.Sprintf(
+				"UNWIND $rels_%s AS r MATCH (a {_db: $_db, uri: r.from})-[x:%s]->(b {_db: $_db, uri: r.to}) DELETE x",
+				relType, relType,
+			))
+		}
+		return strings.Join(cyphers, ";\n"), params
+
+	default:
+		return "", params
+	}
+}
+
+// EnsureIndexes 系统启动时创建 (_db, uri) 复合索引。
+// 每个 EntityType 对应一个索引，确保逻辑 DB 内 URI 查找高效。
+// 使用 CREATE INDEX ... IF NOT EXISTS 保证幂等（重复调用不报错）。
+// 索引名格式: idx_{label}_db_uri（如 idx_device_db_uri）。
+func (c *neo4jClient) EnsureIndexes(ctx context.Context, labels []string) error {
+	if len(labels) == 0 {
+		return nil
+	}
+
+	sess := sessionFactory(ctx, c.driver, neo4j.SessionConfig{AccessMode: neo4j.AccessModeWrite})
+	defer sess.Close(ctx)
+
+	for _, label := range labels {
+		indexName := "idx_" + strings.ToLower(label) + "_db_uri"
+		cypher := fmt.Sprintf(
+			"CREATE INDEX %s IF NOT EXISTS FOR (n:%s) ON (n._db, n.uri)",
+			indexName, label,
+		)
+		if _, err := sess.Run(ctx, cypher, nil); err != nil {
+			return fmt.Errorf("ensure indexes %s: %w", indexName, err)
+		}
+	}
+
+	slog.Info("ensure indexes completed", "count", len(labels))
 	return nil
 }
