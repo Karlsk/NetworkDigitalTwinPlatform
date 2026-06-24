@@ -32,7 +32,13 @@ services:
       NEO4J_USER: neo4j
       NEO4J_PASSWORD: password
       CONFIG_PATH: configs/config.yaml
+      ONTOLOGY_DIR: /app/ontology
+      SNAPSHOT_DIR: /app/snapshots
+    volumes:
+      - ../ontology:/app/ontology:ro
+      - snapshot_data:/app/snapshots
 
 volumes:
   neo4j_data:
   neo4j_logs:
+  snapshot_data:

@@ -1,0 +1,15 @@
+[
+  {
+    "id": "Slice-001",
+    "slice_id": "SL001",
+    "name": "slice-urllc",
+    "sla_bandwidth": 1000,
+    "sla_latency": 10
+  },
+  {
+    "id": "Slice-002",
+    "slice_id": "SL002",
+    "name": "slice-embb",
+    "sla_bandwidth": 5000
+  }
+]

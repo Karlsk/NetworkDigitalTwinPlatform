@@ -32,7 +32,7 @@ type SchemaRegistry interface {
 
 	// Validate 校验数据合法性（属性类型/必填/枚举/stableKeys 非空）。
 	// 不修改输入 map，只返回校验错误。
-	// 多个校验失败时返回聚合错误（以 "; " 分隔）。
+	// 多个校验失败时通过 errors.Join 聚合返回。
 	// entityKind 不存在时返回 ErrSchemaNotFound。
 	Validate(entityKind string, props map[string]any) error
 
@@ -122,7 +122,7 @@ func (r *registryImpl) ListRelationTypes() []*RelationType {
 }
 
 // Validate 校验 props 是否符合 entityKind 对应的 EntityType 定义。
-// 不修改输入 map，多个校验失败时返回聚合错误。
+// 不修改输入 map，多个校验失败时通过 errors.Join 聚合返回。
 func (r *registryImpl) Validate(entityKind string, props map[string]any) error {
 	et, err := r.GetEntityType(entityKind)
 	if err != nil {

@@ -1,16 +1,16 @@
 package schema
 
 import (
+	"errors"
 	"fmt"
-	"strings"
 )
 
 // validateProps 校验 props 是否符合 EntityType 定义。
 // 四阶段校验：必填 → 类型 → 枚举 → stableKeys 非空。
-// 所有失败项聚合后以 "; " 分隔返回。
+// 所有失败项通过 errors.Join 聚合，支持 errors.Is 链式判断。
 // 不修改输入 map。
 func validateProps(et *EntityType, props map[string]any) error {
-	var errs []string
+	var errs []error
 
 	// 阶段 1: 必填校验
 	for name, spec := range et.Spec.Properties {
@@ -19,7 +19,7 @@ func validateProps(et *EntityType, props map[string]any) error {
 		}
 		val, exists := props[name]
 		if !exists || isEmpty(val) {
-			errs = append(errs, fmt.Sprintf("required field %q is missing or empty", name))
+			errs = append(errs, fmt.Errorf("required field %q is missing or empty", name))
 		}
 	}
 
@@ -30,7 +30,7 @@ func validateProps(et *EntityType, props map[string]any) error {
 			continue
 		}
 		if err := checkType(name, val, spec.Type); err != nil {
-			errs = append(errs, err.Error())
+			errs = append(errs, err)
 		}
 	}
 
@@ -45,7 +45,7 @@ func validateProps(et *EntityType, props map[string]any) error {
 		}
 		strVal, ok := val.(string)
 		if !ok || !containsString(spec.Enum, strVal) {
-			errs = append(errs, fmt.Sprintf("field %q value %v not in enum %v", name, val, spec.Enum))
+			errs = append(errs, fmt.Errorf("field %q value %v not in enum %v", name, val, spec.Enum))
 		}
 	}
 
@@ -53,12 +53,12 @@ func validateProps(et *EntityType, props map[string]any) error {
 	for _, key := range et.Spec.Identity.StableKeys {
 		val, exists := props[key]
 		if !exists || isEmpty(val) {
-			errs = append(errs, fmt.Sprintf("stableKey %q must not be empty", key))
+			errs = append(errs, fmt.Errorf("stableKey %q must not be empty", key))
 		}
 	}
 
 	if len(errs) > 0 {
-		return fmt.Errorf("validation failed for %s: %s", et.Metadata.Name, strings.Join(errs, "; "))
+		return fmt.Errorf("validation failed for %s: %w", et.Metadata.Name, errors.Join(errs...))
 	}
 	return nil
 }

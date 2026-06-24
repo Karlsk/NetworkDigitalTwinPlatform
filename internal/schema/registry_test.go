@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -413,8 +414,8 @@ func TestValidate_MultipleFailures(t *testing.T) {
 	if err == nil {
 		t.Fatal("Validate() expected error for multiple failures")
 	}
-	if !bytes.Contains([]byte(err.Error()), []byte(";")) {
-		t.Errorf("error = %q, expected aggregated errors separated by ';'", err.Error())
+	if !strings.Contains(err.Error(), "\n") {
+		t.Errorf("error = %q, expected aggregated errors separated by '\\n' (errors.Join)", err.Error())
 	}
 }
 
