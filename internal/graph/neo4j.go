@@ -9,6 +9,7 @@ import (
 
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j/auth"
+	"gitlab.com/pml/network-digital-twin/internal/assembler"
 	"gitlab.com/pml/network-digital-twin/internal/config"
 )
 
@@ -199,3 +200,85 @@ func (c *neo4jClient) HasDB(ctx context.Context, db string) (bool, error) {
 // 确保 driverFactory 类型签名与 neo4j.NewDriverWithContext 一致。
 // 这是编译时类型安全的文档性注释。
 var _ func(string, auth.TokenManager, ...func(*neo4j.Config)) (neo4j.DriverWithContext, error) = driverFactory
+
+// groupNodesByLabel 按 Label 分组节点。
+// 用于 BulkCreate 将相同 Label 的节点合并到同一条 UNWIND Cypher 中。
+func groupNodesByLabel(nodes []assembler.Node) map[string][]assembler.Node {
+	groups := make(map[string][]assembler.Node)
+	for _, n := range nodes {
+		groups[n.Label] = append(groups[n.Label], n)
+	}
+	return groups
+}
+
+// groupRelsByType 按关系类型分组。
+// 用于 BulkCreate 将相同 RelType 的关系合并到同一条 UNWIND Cypher 中。
+func groupRelsByType(rels []assembler.Relation) map[string][]assembler.Relation {
+	groups := make(map[string][]assembler.Relation)
+	for _, r := range rels {
+		groups[r.Type] = append(groups[r.Type], r)
+	}
+	return groups
+}
+
+// BulkCreate 批量 CREATE（全量同步）。
+// 按 Label 分组节点执行 UNWIND + CREATE，按 RelType 分组关系执行 UNWIND + MATCH + CREATE。
+// 每个节点的 Props 会被复制后注入 _db 和 uri，不修改调用方的原始数据。
+// 调用前必须 ClearDB，否则会导致重复数据（CREATE 不检查幂等性）。
+func (c *neo4jClient) BulkCreate(ctx context.Context, db string, nodes []assembler.Node, rels []assembler.Relation) error {
+	sess := sessionFactory(ctx, c.driver, neo4j.SessionConfig{AccessMode: neo4j.AccessModeWrite})
+	defer sess.Close(ctx)
+
+	// 按 Label 分组批量创建节点
+	for label, group := range groupNodesByLabel(nodes) {
+		nodeData := make([]map[string]any, 0, len(group))
+		for _, n := range group {
+			// 复制 Props 避免修改调用方原始 map
+			props := make(map[string]any, len(n.Props)+2)
+			for k, v := range n.Props {
+				props[k] = v
+			}
+			props["_db"] = db
+			props["uri"] = n.URI
+			nodeData = append(nodeData, props)
+		}
+
+		params := map[string]any{
+			"_db":   db,
+			"nodes": nodeData,
+		}
+		cypher := fmt.Sprintf(
+			"UNWIND $nodes AS n CREATE (x:%s {_db: $_db, uri: n.uri}) SET x += n",
+			label,
+		)
+		if _, err := sess.Run(ctx, cypher, params); err != nil {
+			return fmt.Errorf("bulk create nodes %s: %w", label, err)
+		}
+	}
+
+	// 按 RelType 分组批量创建关系
+	for relType, group := range groupRelsByType(rels) {
+		relData := make([]map[string]any, 0, len(group))
+		for _, r := range group {
+			relData = append(relData, map[string]any{
+				"from": r.From,
+				"to":   r.To,
+			})
+		}
+
+		params := map[string]any{
+			"_db":  db,
+			"rels": relData,
+		}
+		cypher := fmt.Sprintf(
+			"UNWIND $rels AS r MATCH (a {_db: $_db, uri: r.from}) MATCH (b {_db: $_db, uri: r.to}) CREATE (a)-[:%s]->(b)",
+			relType,
+		)
+		if _, err := sess.Run(ctx, cypher, params); err != nil {
+			return fmt.Errorf("bulk create rels %s: %w", relType, err)
+		}
+	}
+
+	slog.Info("bulk create completed", "db", db, "node_labels", len(groupNodesByLabel(nodes)), "rel_types", len(groupRelsByType(rels)))
+	return nil
+}

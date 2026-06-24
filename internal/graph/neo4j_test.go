@@ -9,6 +9,7 @@ import (
 
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j/auth"
+	"gitlab.com/pml/network-digital-twin/internal/assembler"
 	"gitlab.com/pml/network-digital-twin/internal/config"
 )
 
@@ -739,5 +740,435 @@ func TestHasDB_RunError(t *testing.T) {
 	}
 	if !errors.Is(err, wantErr) {
 		t.Errorf("error should wrap original error, got: %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// runCall — BulkCreate 多次 Run 调用捕获辅助结构体
+// ---------------------------------------------------------------------------
+
+// runCall 记录单次 session.Run 调用的 cypher 和 params。
+type runCall struct {
+	cypher string
+	params map[string]any
+}
+
+// captureSessionFactory 替换 sessionFactory 为记录所有 Run 调用的闭包，
+// 同时捕获 SessionConfig.AccessMode，测试结束时自动恢复。
+func captureSessionFactory(t *testing.T, calls *[]runCall, accessMode *neo4j.AccessMode, runErr func(callIndex int) error) {
+	t.Helper()
+	orig := sessionFactory
+	callIdx := 0
+	sessionFactory = func(_ context.Context, _ neo4j.DriverWithContext, cfg neo4j.SessionConfig) session {
+		if accessMode != nil {
+			*accessMode = cfg.AccessMode
+		}
+		return &mockSession{
+			runFn: func(_ context.Context, cypher string, params map[string]any, _ ...func(*neo4j.TransactionConfig)) (result, error) {
+				idx := callIdx
+				callIdx++
+				*calls = append(*calls, runCall{cypher: cypher, params: params})
+				if runErr != nil {
+					if err := runErr(idx); err != nil {
+						return nil, err
+					}
+				}
+				return &mockResult{}, nil
+			},
+		}
+	}
+	t.Cleanup(func() { sessionFactory = orig })
+}
+
+// ---------------------------------------------------------------------------
+// TestBulkCreate — BulkCreate 方法测试
+// ---------------------------------------------------------------------------
+
+func TestBulkCreate_Success(t *testing.T) {
+	var calls []runCall
+	var accessMode neo4j.AccessMode
+	captureSessionFactory(t, &calls, &accessMode, nil)
+
+	client := newTestClient(t)
+	nodes := []assembler.Node{
+		{Label: "Device", URI: "device:SN001", Props: map[string]any{"hostname": "r1"}},
+	}
+	rels := []assembler.Relation{
+		{Type: "HAS_INTERFACE", From: "device:SN001", To: "iface:SN001_eth0"},
+	}
+
+	err := client.BulkCreate(context.Background(), "testdb", nodes, rels)
+	if err != nil {
+		t.Fatalf("BulkCreate() unexpected error: %v", err)
+	}
+
+	// 验证 AccessMode
+	if accessMode != neo4j.AccessModeWrite {
+		t.Errorf("AccessMode = %v, want Write", accessMode)
+	}
+
+	// 应有 2 次 Run 调用：1 次节点 + 1 次关系
+	if len(calls) != 2 {
+		t.Fatalf("expected 2 Run calls, got %d", len(calls))
+	}
+
+	// 验证节点 Cypher
+	nodeCypher := calls[0].cypher
+	if !strings.Contains(nodeCypher, "UNWIND $nodes AS n") {
+		t.Errorf("node cypher should contain 'UNWIND $nodes AS n', got: %s", nodeCypher)
+	}
+	if !strings.Contains(nodeCypher, "CREATE (x:Device") {
+		t.Errorf("node cypher should contain 'CREATE (x:Device', got: %s", nodeCypher)
+	}
+	if !strings.Contains(nodeCypher, "SET x += n") {
+		t.Errorf("node cypher should contain 'SET x += n', got: %s", nodeCypher)
+	}
+
+	// 验证节点 params
+	nodeParams := calls[0].params
+	if nodeParams["_db"] != "testdb" {
+		t.Errorf("node params[_db] = %v, want 'testdb'", nodeParams["_db"])
+	}
+	nodeData, ok := nodeParams["nodes"].([]map[string]any)
+	if !ok || len(nodeData) != 1 {
+		t.Fatalf("node params[nodes] should be []map[string]any with length 1, got: %v", nodeParams["nodes"])
+	}
+	if nodeData[0]["uri"] != "device:SN001" {
+		t.Errorf("nodeData[0][uri] = %v, want 'device:SN001'", nodeData[0]["uri"])
+	}
+	if nodeData[0]["hostname"] != "r1" {
+		t.Errorf("nodeData[0][hostname] = %v, want 'r1'", nodeData[0]["hostname"])
+	}
+
+	// 验证关系 Cypher
+	relCypher := calls[1].cypher
+	if !strings.Contains(relCypher, "UNWIND $rels AS r") {
+		t.Errorf("rel cypher should contain 'UNWIND $rels AS r', got: %s", relCypher)
+	}
+	if !strings.Contains(relCypher, "MATCH (a {_db: $_db, uri: r.from})") {
+		t.Errorf("rel cypher should contain 'MATCH (a {_db: $_db, uri: r.from})', got: %s", relCypher)
+	}
+	if !strings.Contains(relCypher, "CREATE (a)-[:HAS_INTERFACE]->(b)") {
+		t.Errorf("rel cypher should contain 'CREATE (a)-[:HAS_INTERFACE]->(b)', got: %s", relCypher)
+	}
+
+	// 验证关系 params
+	relParams := calls[1].params
+	if relParams["_db"] != "testdb" {
+		t.Errorf("rel params[_db] = %v, want 'testdb'", relParams["_db"])
+	}
+	relData, ok := relParams["rels"].([]map[string]any)
+	if !ok || len(relData) != 1 {
+		t.Fatalf("rel params[rels] should be []map[string]any with length 1, got: %v", relParams["rels"])
+	}
+	if relData[0]["from"] != "device:SN001" {
+		t.Errorf("relData[0][from] = %v, want 'device:SN001'", relData[0]["from"])
+	}
+	if relData[0]["to"] != "iface:SN001_eth0" {
+		t.Errorf("relData[0][to] = %v, want 'iface:SN001_eth0'", relData[0]["to"])
+	}
+}
+
+func TestBulkCreate_EmptyNodes(t *testing.T) {
+	var calls []runCall
+	captureSessionFactory(t, &calls, nil, nil)
+
+	client := newTestClient(t)
+	rels := []assembler.Relation{
+		{Type: "HAS_INTERFACE", From: "device:SN001", To: "iface:SN001_eth0"},
+	}
+
+	err := client.BulkCreate(context.Background(), "testdb", nil, rels)
+	if err != nil {
+		t.Fatalf("BulkCreate() unexpected error: %v", err)
+	}
+
+	// 只有关系创建，应调用 1 次 Run
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 Run call (rels only), got %d", len(calls))
+	}
+	if !strings.Contains(calls[0].cypher, "UNWIND $rels AS r") {
+		t.Errorf("expected rel cypher, got: %s", calls[0].cypher)
+	}
+}
+
+func TestBulkCreate_EmptyRels(t *testing.T) {
+	var calls []runCall
+	captureSessionFactory(t, &calls, nil, nil)
+
+	client := newTestClient(t)
+	nodes := []assembler.Node{
+		{Label: "Device", URI: "device:SN001", Props: map[string]any{"hostname": "r1"}},
+	}
+
+	err := client.BulkCreate(context.Background(), "testdb", nodes, nil)
+	if err != nil {
+		t.Fatalf("BulkCreate() unexpected error: %v", err)
+	}
+
+	// 只有节点创建，应调用 1 次 Run
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 Run call (nodes only), got %d", len(calls))
+	}
+	if !strings.Contains(calls[0].cypher, "UNWIND $nodes AS n") {
+		t.Errorf("expected node cypher, got: %s", calls[0].cypher)
+	}
+}
+
+func TestBulkCreate_MultipleLabels(t *testing.T) {
+	var calls []runCall
+	captureSessionFactory(t, &calls, nil, nil)
+
+	client := newTestClient(t)
+	nodes := []assembler.Node{
+		{Label: "Device", URI: "device:SN001", Props: map[string]any{"hostname": "r1"}},
+		{Label: "Device", URI: "device:SN002", Props: map[string]any{"hostname": "r2"}},
+		{Label: "Interface", URI: "iface:SN001_eth0", Props: map[string]any{"status": "Up"}},
+		{Label: "Interface", URI: "iface:SN001_eth1", Props: map[string]any{"status": "Down"}},
+		{Label: "Interface", URI: "iface:SN002_eth0", Props: map[string]any{"status": "Up"}},
+	}
+
+	err := client.BulkCreate(context.Background(), "testdb", nodes, nil)
+	if err != nil {
+		t.Fatalf("BulkCreate() unexpected error: %v", err)
+	}
+
+	// 2 个 Label 应产生 2 次 Run 调用
+	if len(calls) != 2 {
+		t.Fatalf("expected 2 Run calls (Device + Interface), got %d", len(calls))
+	}
+
+	// 收集每次调用的 label 和节点数
+	labelCounts := make(map[string]int)
+	for _, call := range calls {
+		if strings.Contains(call.cypher, ":Device") {
+			nd := call.params["nodes"].([]map[string]any)
+			labelCounts["Device"] = len(nd)
+		}
+		if strings.Contains(call.cypher, ":Interface") {
+			nd := call.params["nodes"].([]map[string]any)
+			labelCounts["Interface"] = len(nd)
+		}
+	}
+	if labelCounts["Device"] != 2 {
+		t.Errorf("Device group should have 2 nodes, got %d", labelCounts["Device"])
+	}
+	if labelCounts["Interface"] != 3 {
+		t.Errorf("Interface group should have 3 nodes, got %d", labelCounts["Interface"])
+	}
+}
+
+func TestBulkCreate_MultipleRelTypes(t *testing.T) {
+	var calls []runCall
+	captureSessionFactory(t, &calls, nil, nil)
+
+	client := newTestClient(t)
+	rels := []assembler.Relation{
+		{Type: "HAS_INTERFACE", From: "device:SN001", To: "iface:SN001_eth0"},
+		{Type: "CONNECTS_TO", From: "iface:SN001_eth0", To: "iface:SN002_eth0"},
+		{Type: "HAS_INTERFACE", From: "device:SN002", To: "iface:SN002_eth0"},
+	}
+
+	err := client.BulkCreate(context.Background(), "testdb", nil, rels)
+	if err != nil {
+		t.Fatalf("BulkCreate() unexpected error: %v", err)
+	}
+
+	// 2 个 RelType 应产生 2 次 Run 调用
+	if len(calls) != 2 {
+		t.Fatalf("expected 2 Run calls (HAS_INTERFACE + CONNECTS_TO), got %d", len(calls))
+	}
+
+	// 验证两种关系类型都出现
+	foundHI := false
+	foundCT := false
+	for _, call := range calls {
+		if strings.Contains(call.cypher, "[:HAS_INTERFACE]") {
+			foundHI = true
+			rd := call.params["rels"].([]map[string]any)
+			if len(rd) != 2 {
+				t.Errorf("HAS_INTERFACE group should have 2 rels, got %d", len(rd))
+			}
+		}
+		if strings.Contains(call.cypher, "[:CONNECTS_TO]") {
+			foundCT = true
+			rd := call.params["rels"].([]map[string]any)
+			if len(rd) != 1 {
+				t.Errorf("CONNECTS_TO group should have 1 rel, got %d", len(rd))
+			}
+		}
+	}
+	if !foundHI {
+		t.Error("expected HAS_INTERFACE rel cypher not found")
+	}
+	if !foundCT {
+		t.Error("expected CONNECTS_TO rel cypher not found")
+	}
+}
+
+func TestBulkCreate_NodeRunError(t *testing.T) {
+	wantErr := errors.New("write failed")
+	captureSessionFactory(t, &[]runCall{}, nil, func(callIndex int) error {
+		return wantErr // 节点 Run 立即失败
+	})
+
+	client := newTestClient(t)
+	nodes := []assembler.Node{
+		{Label: "Device", URI: "device:SN001", Props: map[string]any{"hostname": "r1"}},
+	}
+
+	err := client.BulkCreate(context.Background(), "testdb", nodes, nil)
+	if err == nil {
+		t.Fatal("BulkCreate() should return error when node Run fails")
+	}
+	if !strings.Contains(err.Error(), "bulk create nodes") {
+		t.Errorf("error should contain 'bulk create nodes', got: %v", err)
+	}
+	if !errors.Is(err, wantErr) {
+		t.Errorf("error should wrap original error, got: %v", err)
+	}
+}
+
+func TestBulkCreate_RelRunError(t *testing.T) {
+	wantErr := errors.New("rel write failed")
+	captureSessionFactory(t, &[]runCall{}, nil, func(callIndex int) error {
+		if callIndex > 0 { // 第二次调用（关系）失败
+			return wantErr
+		}
+		return nil
+	})
+
+	client := newTestClient(t)
+	nodes := []assembler.Node{
+		{Label: "Device", URI: "device:SN001", Props: map[string]any{"hostname": "r1"}},
+	}
+	rels := []assembler.Relation{
+		{Type: "HAS_INTERFACE", From: "device:SN001", To: "iface:SN001_eth0"},
+	}
+
+	err := client.BulkCreate(context.Background(), "testdb", nodes, rels)
+	if err == nil {
+		t.Fatal("BulkCreate() should return error when rel Run fails")
+	}
+	if !strings.Contains(err.Error(), "bulk create rels") {
+		t.Errorf("error should contain 'bulk create rels', got: %v", err)
+	}
+	if !errors.Is(err, wantErr) {
+		t.Errorf("error should wrap original error, got: %v", err)
+	}
+}
+
+func TestBulkCreate_DBPropertyInjected(t *testing.T) {
+	var calls []runCall
+	captureSessionFactory(t, &calls, nil, nil)
+
+	client := newTestClient(t)
+	nodes := []assembler.Node{
+		{Label: "Device", URI: "device:SN001", Props: map[string]any{"hostname": "r1"}},
+		{Label: "Interface", URI: "iface:SN001_eth0", Props: map[string]any{"status": "Up"}},
+	}
+
+	err := client.BulkCreate(context.Background(), "mydb", nodes, nil)
+	if err != nil {
+		t.Fatalf("BulkCreate() unexpected error: %v", err)
+	}
+
+	// 遍历所有节点 Run 调用，验证每个 node 都含 _db 和 uri
+	for _, call := range calls {
+		if !strings.Contains(call.cypher, "UNWIND $nodes") {
+			continue
+		}
+		nd, ok := call.params["nodes"].([]map[string]any)
+		if !ok {
+			t.Fatalf("params[nodes] is not []map[string]any: %v", call.params["nodes"])
+		}
+		for i, n := range nd {
+			if n["_db"] != "mydb" {
+				t.Errorf("node[%d][_db] = %v, want 'mydb'", i, n["_db"])
+			}
+			if _, hasURI := n["uri"]; !hasURI {
+				t.Errorf("node[%d] missing 'uri' key", i)
+			}
+		}
+	}
+}
+
+func TestBulkCreate_NoMutateCallerProps(t *testing.T) {
+	var calls []runCall
+	captureSessionFactory(t, &calls, nil, nil)
+
+	client := newTestClient(t)
+	originalProps := map[string]any{"hostname": "r1"}
+	nodes := []assembler.Node{
+		{Label: "Device", URI: "device:SN001", Props: originalProps},
+	}
+
+	err := client.BulkCreate(context.Background(), "testdb", nodes, nil)
+	if err != nil {
+		t.Fatalf("BulkCreate() unexpected error: %v", err)
+	}
+
+	// 验证原始 Props 未被注入 _db 或 uri
+	if _, hasDB := originalProps["_db"]; hasDB {
+		t.Errorf("BulkCreate() should not mutate caller's Props, but original now contains _db: %v", originalProps)
+	}
+	if _, hasURI := originalProps["uri"]; hasURI {
+		t.Errorf("BulkCreate() should not mutate caller's Props, but original now contains uri: %v", originalProps)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// TestGroupNodesByLabel / TestGroupRelsByType — 辅助函数单元测试
+// ---------------------------------------------------------------------------
+
+func TestGroupNodesByLabel(t *testing.T) {
+	nodes := []assembler.Node{
+		{Label: "Device", URI: "device:SN001"},
+		{Label: "Interface", URI: "iface:SN001_eth0"},
+		{Label: "Device", URI: "device:SN002"},
+	}
+
+	groups := groupNodesByLabel(nodes)
+	if len(groups) != 2 {
+		t.Fatalf("groupNodesByLabel() returned %d groups, want 2", len(groups))
+	}
+	if len(groups["Device"]) != 2 {
+		t.Errorf("Device group length = %d, want 2", len(groups["Device"]))
+	}
+	if len(groups["Interface"]) != 1 {
+		t.Errorf("Interface group length = %d, want 1", len(groups["Interface"]))
+	}
+}
+
+func TestGroupNodesByLabel_Empty(t *testing.T) {
+	groups := groupNodesByLabel(nil)
+	if len(groups) != 0 {
+		t.Errorf("groupNodesByLabel(nil) returned %d groups, want 0", len(groups))
+	}
+}
+
+func TestGroupRelsByType(t *testing.T) {
+	rels := []assembler.Relation{
+		{Type: "HAS_INTERFACE", From: "device:SN001", To: "iface:SN001_eth0"},
+		{Type: "CONNECTS_TO", From: "iface:SN001_eth0", To: "iface:SN002_eth0"},
+		{Type: "HAS_INTERFACE", From: "device:SN002", To: "iface:SN002_eth0"},
+	}
+
+	groups := groupRelsByType(rels)
+	if len(groups) != 2 {
+		t.Fatalf("groupRelsByType() returned %d groups, want 2", len(groups))
+	}
+	if len(groups["HAS_INTERFACE"]) != 2 {
+		t.Errorf("HAS_INTERFACE group length = %d, want 2", len(groups["HAS_INTERFACE"]))
+	}
+	if len(groups["CONNECTS_TO"]) != 1 {
+		t.Errorf("CONNECTS_TO group length = %d, want 1", len(groups["CONNECTS_TO"]))
+	}
+}
+
+func TestGroupRelsByType_Empty(t *testing.T) {
+	groups := groupRelsByType(nil)
+	if len(groups) != 0 {
+		t.Errorf("groupRelsByType(nil) returned %d groups, want 0", len(groups))
 	}
 }
