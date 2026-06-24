@@ -20,7 +20,7 @@
     "status": "Up",
     "device_type": "Edge",
     "interfaces": ["iface:SN12346_GE1/0/1", "iface:SN12346_GE1/0/2", "iface:SN12346_GE1/0/3", "iface:SN12346_GE1/0/4"],
-    "upstream_links": ["iface:SN12345_GE1/0/1"]
+    "upstream_links": ["device:SN12345"]
   },
   {
     "serial_number": "SN12347",
@@ -32,6 +32,6 @@
     "status": "Up",
     "device_type": "Access",
     "interfaces": ["iface:SN12347_GE1/0/1", "iface:SN12347_GE1/0/2", "iface:SN12347_GE1/0/3", "iface:SN12347_GE1/0/4"],
-    "upstream_links": ["iface:SN12346_GE1/0/1"]
+    "upstream_links": ["device:SN12346"]
   }
 ]

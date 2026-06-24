@@ -1,4 +1,4 @@
-.PHONY: build test test-integration test-race lint docker-up docker-down
+.PHONY: build test test-integration test-race lint docker-up docker-down pipeline-demo
 
 build:
 	go build ./...
@@ -20,3 +20,6 @@ docker-up:
 
 docker-down:
 	docker-compose -f deploy/docker-compose.yml down
+
+pipeline-demo:
+	go run cmd/pipeline-demo/main.go
