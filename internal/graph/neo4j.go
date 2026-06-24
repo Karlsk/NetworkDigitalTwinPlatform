@@ -282,3 +282,68 @@ func (c *neo4jClient) BulkCreate(ctx context.Context, db string, nodes []assembl
 	slog.Info("bulk create completed", "db", db, "node_labels", len(groupNodesByLabel(nodes)), "rel_types", len(groupRelsByType(rels)))
 	return nil
 }
+
+// Upsert 增量 MERGE 节点 + SET += 属性合并 + MERGE 关系。
+// 节点使用 MERGE 匹配 (_db, uri)，SET += 增量合并属性（新属性添加，旧属性保留，已传属性更新）。
+// 关系使用 MERGE 幂等创建（已存在则跳过，不存在则创建）。
+// 先 Upsert 所有节点（确保目标节点存在），再 MERGE 关系。
+func (c *neo4jClient) Upsert(ctx context.Context, db string, nodes []assembler.Node, rels []assembler.Relation) error {
+	sess := sessionFactory(ctx, c.driver, neo4j.SessionConfig{AccessMode: neo4j.AccessModeWrite})
+	defer sess.Close(ctx)
+
+	// 按 Label 分组增量 Upsert 节点
+	for label, group := range groupNodesByLabel(nodes) {
+		nodeData := make([]map[string]any, 0, len(group))
+		for _, n := range group {
+			// 复制 Props 避免修改调用方原始 map
+			props := make(map[string]any, len(n.Props)+1)
+			for k, v := range n.Props {
+				props[k] = v
+			}
+			props["_db"] = db
+			// 注意：props 不含 uri（MERGE 匹配键已设置）
+			nodeData = append(nodeData, map[string]any{
+				"uri":   n.URI,
+				"props": props,
+			})
+		}
+
+		params := map[string]any{
+			"_db":   db,
+			"nodes": nodeData,
+		}
+		cypher := fmt.Sprintf(
+			"UNWIND $nodes AS n MERGE (x:%s {_db: $_db, uri: n.uri}) SET x += n.props",
+			label,
+		)
+		if _, err := sess.Run(ctx, cypher, params); err != nil {
+			return fmt.Errorf("upsert nodes %s: %w", label, err)
+		}
+	}
+
+	// 按 RelType 分组幂等 MERGE 关系
+	for relType, group := range groupRelsByType(rels) {
+		relData := make([]map[string]any, 0, len(group))
+		for _, r := range group {
+			relData = append(relData, map[string]any{
+				"from": r.From,
+				"to":   r.To,
+			})
+		}
+
+		params := map[string]any{
+			"_db":  db,
+			"rels": relData,
+		}
+		cypher := fmt.Sprintf(
+			"UNWIND $rels AS r MATCH (a {_db: $_db, uri: r.from}) MATCH (b {_db: $_db, uri: r.to}) MERGE (a)-[:%s]->(b)",
+			relType,
+		)
+		if _, err := sess.Run(ctx, cypher, params); err != nil {
+			return fmt.Errorf("upsert rels %s: %w", relType, err)
+		}
+	}
+
+	slog.Info("upsert completed", "db", db, "node_labels", len(groupNodesByLabel(nodes)), "rel_types", len(groupRelsByType(rels)))
+	return nil
+}

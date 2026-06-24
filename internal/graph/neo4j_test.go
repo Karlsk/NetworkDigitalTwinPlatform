@@ -1172,3 +1172,432 @@ func TestGroupRelsByType_Empty(t *testing.T) {
 		t.Errorf("groupRelsByType(nil) returned %d groups, want 0", len(groups))
 	}
 }
+
+// ---------------------------------------------------------------------------
+// TestUpsert — Upsert 方法测试
+// ---------------------------------------------------------------------------
+
+func TestUpsert_Success(t *testing.T) {
+	var calls []runCall
+	var accessMode neo4j.AccessMode
+	captureSessionFactory(t, &calls, &accessMode, nil)
+
+	client := newTestClient(t)
+	nodes := []assembler.Node{
+		{Label: "Device", URI: "device:SN001", Props: map[string]any{"hostname": "r1"}},
+	}
+	rels := []assembler.Relation{
+		{Type: "HAS_INTERFACE", From: "device:SN001", To: "iface:SN001_eth0"},
+	}
+
+	err := client.Upsert(context.Background(), "testdb", nodes, rels)
+	if err != nil {
+		t.Fatalf("Upsert() unexpected error: %v", err)
+	}
+
+	// 验证 AccessMode
+	if accessMode != neo4j.AccessModeWrite {
+		t.Errorf("AccessMode = %v, want Write", accessMode)
+	}
+
+	// 应有 2 次 Run 调用：1 次节点 + 1 次关系
+	if len(calls) != 2 {
+		t.Fatalf("expected 2 Run calls, got %d", len(calls))
+	}
+
+	// 验证节点 Cypher
+	nodeCypher := calls[0].cypher
+	if !strings.Contains(nodeCypher, "UNWIND $nodes AS n") {
+		t.Errorf("node cypher should contain 'UNWIND $nodes AS n', got: %s", nodeCypher)
+	}
+	if !strings.Contains(nodeCypher, "MERGE (x:Device") {
+		t.Errorf("node cypher should contain 'MERGE (x:Device', got: %s", nodeCypher)
+	}
+	if !strings.Contains(nodeCypher, "SET x += n.props") {
+		t.Errorf("node cypher should contain 'SET x += n.props', got: %s", nodeCypher)
+	}
+	if !strings.Contains(nodeCypher, "_db: $_db, uri: n.uri") {
+		t.Errorf("node cypher should contain '_db: $_db, uri: n.uri', got: %s", nodeCypher)
+	}
+
+	// 验证节点 params
+	nodeParams := calls[0].params
+	if nodeParams["_db"] != "testdb" {
+		t.Errorf("node params[_db] = %v, want 'testdb'", nodeParams["_db"])
+	}
+	nodeData, ok := nodeParams["nodes"].([]map[string]any)
+	if !ok || len(nodeData) != 1 {
+		t.Fatalf("node params[nodes] should be []map[string]any with length 1, got: %v", nodeParams["nodes"])
+	}
+	if nodeData[0]["uri"] != "device:SN001" {
+		t.Errorf("nodeData[0][uri] = %v, want 'device:SN001'", nodeData[0]["uri"])
+	}
+	// 验证嵌套 props 结构
+	props, ok := nodeData[0]["props"].(map[string]any)
+	if !ok {
+		t.Fatalf("nodeData[0][props] should be map[string]any, got: %T", nodeData[0]["props"])
+	}
+	if props["hostname"] != "r1" {
+		t.Errorf("props[hostname] = %v, want 'r1'", props["hostname"])
+	}
+	if props["_db"] != "testdb" {
+		t.Errorf("props[_db] = %v, want 'testdb'", props["_db"])
+	}
+	// props 不应包含 uri（MERGE 匹配键已设置）
+	if _, hasURI := props["uri"]; hasURI {
+		t.Errorf("props should not contain 'uri', but got: %v", props)
+	}
+
+	// 验证关系 Cypher
+	relCypher := calls[1].cypher
+	if !strings.Contains(relCypher, "UNWIND $rels AS r") {
+		t.Errorf("rel cypher should contain 'UNWIND $rels AS r', got: %s", relCypher)
+	}
+	if !strings.Contains(relCypher, "MATCH (a {_db: $_db, uri: r.from})") {
+		t.Errorf("rel cypher should contain 'MATCH (a {_db: $_db, uri: r.from})', got: %s", relCypher)
+	}
+	if !strings.Contains(relCypher, "MERGE (a)-[:HAS_INTERFACE]->(b)") {
+		t.Errorf("rel cypher should contain 'MERGE (a)-[:HAS_INTERFACE]->(b)', got: %s", relCypher)
+	}
+
+	// 验证关系 params
+	relParams := calls[1].params
+	if relParams["_db"] != "testdb" {
+		t.Errorf("rel params[_db] = %v, want 'testdb'", relParams["_db"])
+	}
+	relData, ok := relParams["rels"].([]map[string]any)
+	if !ok || len(relData) != 1 {
+		t.Fatalf("rel params[rels] should be []map[string]any with length 1, got: %v", relParams["rels"])
+	}
+	if relData[0]["from"] != "device:SN001" {
+		t.Errorf("relData[0][from] = %v, want 'device:SN001'", relData[0]["from"])
+	}
+	if relData[0]["to"] != "iface:SN001_eth0" {
+		t.Errorf("relData[0][to] = %v, want 'iface:SN001_eth0'", relData[0]["to"])
+	}
+}
+
+func TestUpsert_EmptyNodes(t *testing.T) {
+	var calls []runCall
+	captureSessionFactory(t, &calls, nil, nil)
+
+	client := newTestClient(t)
+	rels := []assembler.Relation{
+		{Type: "HAS_INTERFACE", From: "device:SN001", To: "iface:SN001_eth0"},
+	}
+
+	err := client.Upsert(context.Background(), "testdb", nil, rels)
+	if err != nil {
+		t.Fatalf("Upsert() unexpected error: %v", err)
+	}
+
+	// 只有关系 Upsert，应调用 1 次 Run
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 Run call (rels only), got %d", len(calls))
+	}
+	if !strings.Contains(calls[0].cypher, "UNWIND $rels AS r") {
+		t.Errorf("expected rel cypher, got: %s", calls[0].cypher)
+	}
+	if !strings.Contains(calls[0].cypher, "MERGE") {
+		t.Errorf("rel cypher should contain MERGE, got: %s", calls[0].cypher)
+	}
+}
+
+func TestUpsert_EmptyRels(t *testing.T) {
+	var calls []runCall
+	captureSessionFactory(t, &calls, nil, nil)
+
+	client := newTestClient(t)
+	nodes := []assembler.Node{
+		{Label: "Device", URI: "device:SN001", Props: map[string]any{"hostname": "r1"}},
+	}
+
+	err := client.Upsert(context.Background(), "testdb", nodes, nil)
+	if err != nil {
+		t.Fatalf("Upsert() unexpected error: %v", err)
+	}
+
+	// 只有节点 Upsert，应调用 1 次 Run
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 Run call (nodes only), got %d", len(calls))
+	}
+	if !strings.Contains(calls[0].cypher, "UNWIND $nodes AS n") {
+		t.Errorf("expected node cypher, got: %s", calls[0].cypher)
+	}
+	if !strings.Contains(calls[0].cypher, "MERGE") {
+		t.Errorf("node cypher should contain MERGE, got: %s", calls[0].cypher)
+	}
+}
+
+func TestUpsert_MultipleLabels(t *testing.T) {
+	var calls []runCall
+	captureSessionFactory(t, &calls, nil, nil)
+
+	client := newTestClient(t)
+	nodes := []assembler.Node{
+		{Label: "Device", URI: "device:SN001", Props: map[string]any{"hostname": "r1"}},
+		{Label: "Device", URI: "device:SN002", Props: map[string]any{"hostname": "r2"}},
+		{Label: "Interface", URI: "iface:SN001_eth0", Props: map[string]any{"status": "Up"}},
+		{Label: "Interface", URI: "iface:SN001_eth1", Props: map[string]any{"status": "Down"}},
+		{Label: "Interface", URI: "iface:SN002_eth0", Props: map[string]any{"status": "Up"}},
+	}
+
+	err := client.Upsert(context.Background(), "testdb", nodes, nil)
+	if err != nil {
+		t.Fatalf("Upsert() unexpected error: %v", err)
+	}
+
+	// 2 个 Label 应产生 2 次 Run 调用
+	if len(calls) != 2 {
+		t.Fatalf("expected 2 Run calls (Device + Interface), got %d", len(calls))
+	}
+
+	// 收集每次调用的 label 和节点数
+	labelCounts := make(map[string]int)
+	for _, call := range calls {
+		if strings.Contains(call.cypher, ":Device") {
+			nd := call.params["nodes"].([]map[string]any)
+			labelCounts["Device"] = len(nd)
+		}
+		if strings.Contains(call.cypher, ":Interface") {
+			nd := call.params["nodes"].([]map[string]any)
+			labelCounts["Interface"] = len(nd)
+		}
+	}
+	if labelCounts["Device"] != 2 {
+		t.Errorf("Device group should have 2 nodes, got %d", labelCounts["Device"])
+	}
+	if labelCounts["Interface"] != 3 {
+		t.Errorf("Interface group should have 3 nodes, got %d", labelCounts["Interface"])
+	}
+}
+
+func TestUpsert_MultipleRelTypes(t *testing.T) {
+	var calls []runCall
+	captureSessionFactory(t, &calls, nil, nil)
+
+	client := newTestClient(t)
+	rels := []assembler.Relation{
+		{Type: "HAS_INTERFACE", From: "device:SN001", To: "iface:SN001_eth0"},
+		{Type: "CONNECTS_TO", From: "iface:SN001_eth0", To: "iface:SN002_eth0"},
+		{Type: "HAS_INTERFACE", From: "device:SN002", To: "iface:SN002_eth0"},
+	}
+
+	err := client.Upsert(context.Background(), "testdb", nil, rels)
+	if err != nil {
+		t.Fatalf("Upsert() unexpected error: %v", err)
+	}
+
+	// 2 个 RelType 应产生 2 次 Run 调用
+	if len(calls) != 2 {
+		t.Fatalf("expected 2 Run calls (HAS_INTERFACE + CONNECTS_TO), got %d", len(calls))
+	}
+
+	// 验证两种关系类型都出现
+	foundHI := false
+	foundCT := false
+	for _, call := range calls {
+		if strings.Contains(call.cypher, "[:HAS_INTERFACE]") {
+			foundHI = true
+			rd := call.params["rels"].([]map[string]any)
+			if len(rd) != 2 {
+				t.Errorf("HAS_INTERFACE group should have 2 rels, got %d", len(rd))
+			}
+		}
+		if strings.Contains(call.cypher, "[:CONNECTS_TO]") {
+			foundCT = true
+			rd := call.params["rels"].([]map[string]any)
+			if len(rd) != 1 {
+				t.Errorf("CONNECTS_TO group should have 1 rel, got %d", len(rd))
+			}
+		}
+	}
+	if !foundHI {
+		t.Error("expected HAS_INTERFACE rel cypher not found")
+	}
+	if !foundCT {
+		t.Error("expected CONNECTS_TO rel cypher not found")
+	}
+}
+
+func TestUpsert_NodeRunError(t *testing.T) {
+	wantErr := errors.New("write failed")
+	captureSessionFactory(t, &[]runCall{}, nil, func(callIndex int) error {
+		return wantErr // 节点 Run 立即失败
+	})
+
+	client := newTestClient(t)
+	nodes := []assembler.Node{
+		{Label: "Device", URI: "device:SN001", Props: map[string]any{"hostname": "r1"}},
+	}
+
+	err := client.Upsert(context.Background(), "testdb", nodes, nil)
+	if err == nil {
+		t.Fatal("Upsert() should return error when node Run fails")
+	}
+	if !strings.Contains(err.Error(), "upsert nodes") {
+		t.Errorf("error should contain 'upsert nodes', got: %v", err)
+	}
+	if !errors.Is(err, wantErr) {
+		t.Errorf("error should wrap original error, got: %v", err)
+	}
+}
+
+func TestUpsert_RelRunError(t *testing.T) {
+	wantErr := errors.New("rel write failed")
+	captureSessionFactory(t, &[]runCall{}, nil, func(callIndex int) error {
+		if callIndex > 0 { // 第二次调用（关系）失败
+			return wantErr
+		}
+		return nil
+	})
+
+	client := newTestClient(t)
+	nodes := []assembler.Node{
+		{Label: "Device", URI: "device:SN001", Props: map[string]any{"hostname": "r1"}},
+	}
+	rels := []assembler.Relation{
+		{Type: "HAS_INTERFACE", From: "device:SN001", To: "iface:SN001_eth0"},
+	}
+
+	err := client.Upsert(context.Background(), "testdb", nodes, rels)
+	if err == nil {
+		t.Fatal("Upsert() should return error when rel Run fails")
+	}
+	if !strings.Contains(err.Error(), "upsert rels") {
+		t.Errorf("error should contain 'upsert rels', got: %v", err)
+	}
+	if !errors.Is(err, wantErr) {
+		t.Errorf("error should wrap original error, got: %v", err)
+	}
+}
+
+func TestUpsert_DBPropertyInjected(t *testing.T) {
+	var calls []runCall
+	captureSessionFactory(t, &calls, nil, nil)
+
+	client := newTestClient(t)
+	nodes := []assembler.Node{
+		{Label: "Device", URI: "device:SN001", Props: map[string]any{"hostname": "r1"}},
+		{Label: "Interface", URI: "iface:SN001_eth0", Props: map[string]any{"status": "Up"}},
+	}
+
+	err := client.Upsert(context.Background(), "mydb", nodes, nil)
+	if err != nil {
+		t.Fatalf("Upsert() unexpected error: %v", err)
+	}
+
+	// 遍历所有节点 Run 调用，验证每个 node 都含 _db 和 uri
+	for _, call := range calls {
+		if !strings.Contains(call.cypher, "UNWIND $nodes") {
+			continue
+		}
+		nd, ok := call.params["nodes"].([]map[string]any)
+		if !ok {
+			t.Fatalf("params[nodes] is not []map[string]any: %v", call.params["nodes"])
+		}
+		for i, n := range nd {
+			// 顶层应含 uri
+			if _, hasURI := n["uri"]; !hasURI {
+				t.Errorf("node[%d] missing 'uri' key at top level", i)
+			}
+			// props 应含 _db
+			props, ok := n["props"].(map[string]any)
+			if !ok {
+				t.Errorf("node[%d][props] is not map[string]any", i)
+				continue
+			}
+			if props["_db"] != "mydb" {
+				t.Errorf("node[%d].props[_db] = %v, want 'mydb'", i, props["_db"])
+			}
+		}
+	}
+}
+
+func TestUpsert_NoMutateCallerProps(t *testing.T) {
+	var calls []runCall
+	captureSessionFactory(t, &calls, nil, nil)
+
+	client := newTestClient(t)
+	originalProps := map[string]any{"hostname": "r1"}
+	nodes := []assembler.Node{
+		{Label: "Device", URI: "device:SN001", Props: originalProps},
+	}
+
+	err := client.Upsert(context.Background(), "testdb", nodes, nil)
+	if err != nil {
+		t.Fatalf("Upsert() unexpected error: %v", err)
+	}
+
+	// 验证原始 Props 未被注入 _db 或 uri
+	if _, hasDB := originalProps["_db"]; hasDB {
+		t.Errorf("Upsert() should not mutate caller's Props, but original now contains _db: %v", originalProps)
+	}
+	if _, hasURI := originalProps["uri"]; hasURI {
+		t.Errorf("Upsert() should not mutate caller's Props, but original now contains uri: %v", originalProps)
+	}
+	if originalProps["hostname"] != "r1" {
+		t.Errorf("original map modified: hostname = %v, want 'r1'", originalProps["hostname"])
+	}
+}
+
+func TestUpsert_MERGEsemantics(t *testing.T) {
+	var calls []runCall
+	captureSessionFactory(t, &calls, nil, nil)
+
+	client := newTestClient(t)
+	nodes := []assembler.Node{
+		{Label: "Device", URI: "device:SN001", Props: map[string]any{"hostname": "r1"}},
+	}
+	rels := []assembler.Relation{
+		{Type: "HAS_INTERFACE", From: "device:SN001", To: "iface:SN001_eth0"},
+	}
+
+	err := client.Upsert(context.Background(), "testdb", nodes, rels)
+	if err != nil {
+		t.Fatalf("Upsert() unexpected error: %v", err)
+	}
+
+	if len(calls) != 2 {
+		t.Fatalf("expected 2 Run calls, got %d", len(calls))
+	}
+
+	// 验证节点 Cypher 使用 MERGE 而非 CREATE
+	nodeCypher := calls[0].cypher
+	if !strings.Contains(nodeCypher, "MERGE") {
+		t.Errorf("node cypher should contain MERGE, got: %s", nodeCypher)
+	}
+	if strings.Contains(nodeCypher, "CREATE") {
+		t.Errorf("node cypher should NOT contain CREATE, got: %s", nodeCypher)
+	}
+	// 验证 MERGE 匹配键
+	if !strings.Contains(nodeCypher, "_db: $_db, uri: n.uri") {
+		t.Errorf("node cypher MERGE key should be {_db: $_db, uri: n.uri}, got: %s", nodeCypher)
+	}
+	// 验证 SET 使用 n.props 而非 n
+	if !strings.Contains(nodeCypher, "SET x += n.props") {
+		t.Errorf("node cypher should use 'SET x += n.props', got: %s", nodeCypher)
+	}
+
+	// 验证关系 Cypher 使用 MERGE 而非 CREATE
+	relCypher := calls[1].cypher
+	if !strings.Contains(relCypher, "MERGE") {
+		t.Errorf("rel cypher should contain MERGE, got: %s", relCypher)
+	}
+	if strings.Contains(relCypher, "CREATE") {
+		t.Errorf("rel cypher should NOT contain CREATE, got: %s", relCypher)
+	}
+
+	// 验证 params 中 nodes 是嵌套结构（非扁平 map）
+	nodeData, ok := calls[0].params["nodes"].([]map[string]any)
+	if !ok || len(nodeData) != 1 {
+		t.Fatalf("params[nodes] should be []map[string]any with length 1, got: %v", calls[0].params["nodes"])
+	}
+	// 顶层应有 uri 和 props 两个键
+	if _, hasURI := nodeData[0]["uri"]; !hasURI {
+		t.Errorf("nodeData[0] should have 'uri' at top level, got: %v", nodeData[0])
+	}
+	if _, hasProps := nodeData[0]["props"]; !hasProps {
+		t.Errorf("nodeData[0] should have 'props' at top level, got: %v", nodeData[0])
+	}
+}
