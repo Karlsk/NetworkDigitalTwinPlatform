@@ -39,3 +39,5 @@ snapshots/
 
 .qoder
 .claude
+# Build artifacts
+/pipeline-demo
