@@ -35,6 +35,7 @@ func (s *stubGraphDB) ClearDB(_ context.Context, _ string) error { return nil }
 func (s *stubGraphDB) CloneDB(_ context.Context, _, _ string) error { return nil }
 func (s *stubGraphDB) ListDBs(_ context.Context) ([]string, error) { return nil, nil }
 func (s *stubGraphDB) HasDB(_ context.Context, _ string) (bool, error) { return false, nil }
+func (s *stubGraphDB) EnsureIndexes(_ context.Context, _ []string) error { return nil }
 
 // Compile-time check: stubGraphDB must satisfy GraphDB interface.
 var _ GraphDB = (*stubGraphDB)(nil)
@@ -42,7 +43,7 @@ var _ GraphDB = (*stubGraphDB)(nil)
 // --- Interface method count and db parameter verification ---
 
 func TestGraphDBMethodCount(t *testing.T) {
-	// This test documents the expected 12 methods of GraphDB.
+	// This test documents the expected 13 methods of GraphDB.
 	// If a method is added or removed, the stubGraphDB above will fail
 	// to compile, and this test serves as documentation.
 	var db GraphDB = &stubGraphDB{}
@@ -69,6 +70,9 @@ func TestGraphDBMethodCount(t *testing.T) {
 	_ = db.CloneDB(ctx, "source", "target")
 	_, _ = db.ListDBs(ctx)
 	_, _ = db.HasDB(ctx, "default")
+
+	// Category: 索引管理 (1 method)
+	_ = db.EnsureIndexes(ctx, []string{"Device"})
 }
 
 // --- db parameter presence verification ---

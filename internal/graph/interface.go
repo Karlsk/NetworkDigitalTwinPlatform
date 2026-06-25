@@ -59,4 +59,9 @@ type GraphDB interface {
 
 	// HasDB 判断逻辑 DB 是否存在数据。
 	HasDB(ctx context.Context, db string) (bool, error)
+
+	// === 索引管理 ===
+
+	// EnsureIndexes 创建 (_db, uri) 复合索引（幂等）。
+	EnsureIndexes(ctx context.Context, labels []string) error
 }

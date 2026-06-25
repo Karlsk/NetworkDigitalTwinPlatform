@@ -161,11 +161,11 @@ func withMockSessionFactory(t *testing.T, ms *mockSession) {
 func newTestClient(t *testing.T) *neo4jClient {
 	t.Helper()
 	withMockDriver(t, &mockDriver{})
-	client, err := NewNeo4jClient(testCfg())
+	gdb, err := NewNeo4jClient(testCfg())
 	if err != nil {
 		t.Fatalf("NewNeo4jClient() unexpected error: %v", err)
 	}
-	return client
+	return gdb.(*neo4jClient)
 }
 
 // ---------------------------------------------------------------------------
@@ -203,10 +203,11 @@ func TestNewNeo4jClient_InvalidURI(t *testing.T) {
 func TestNewNeo4jClient_DefaultDB(t *testing.T) {
 	withMockDriver(t, &mockDriver{})
 
-	client, err := NewNeo4jClient(testCfg())
+	gdb, err := NewNeo4jClient(testCfg())
 	if err != nil {
 		t.Fatalf("NewNeo4jClient() unexpected error: %v", err)
 	}
+	client := gdb.(*neo4jClient)
 	if client.defaultDB != "testdb" {
 		t.Errorf("defaultDB = %q, want %q", client.defaultDB, "testdb")
 	}
@@ -218,10 +219,11 @@ func TestNewNeo4jClient_DefaultDBEmpty(t *testing.T) {
 	cfg := testCfg()
 	cfg.DefaultDB = ""
 
-	client, err := NewNeo4jClient(cfg)
+	gdb, err := NewNeo4jClient(cfg)
 	if err != nil {
 		t.Fatalf("NewNeo4jClient() unexpected error: %v", err)
 	}
+	client := gdb.(*neo4jClient)
 	if client.defaultDB != "" {
 		t.Errorf("defaultDB = %q, want empty string", client.defaultDB)
 	}

@@ -3,6 +3,7 @@ package service
 
 import (
 	"context"
+	"sync/atomic"
 
 	"gitlab.com/pml/network-digital-twin/internal/assembler"
 	"gitlab.com/pml/network-digital-twin/internal/connector"
@@ -16,13 +17,24 @@ import (
 // mockGraphDB 实现 GraphDB 接口，支持注入错误和记录调用参数。
 type mockGraphDB struct {
 	// 注入错误
-	clearDBErr    error
-	bulkCreateErr error
+	clearDBErr         error
+	bulkCreateErr      error
+	upsertErr          error
+	deleteByURIsErr    error
+	deleteRelationsErr error
 
 	// 记录调用参数
-	clearDBCalls    []string
-	bulkCreateNodes []assembler.Node
-	bulkCreateRels  []assembler.Relation
+	clearDBCalls         []string
+	bulkCreateNodes      []assembler.Node
+	bulkCreateRels       []assembler.Relation
+	upsertNodes          []assembler.Node
+	upsertRels           []assembler.Relation
+	deleteByURIsCalls    [][]string
+	deleteRelationsCalls [][]assembler.Relation
+
+	// 原子计数器（并发安全，用于测试轮询）
+	deleteByURIsCount    atomic.Int32
+	deleteRelationsCount atomic.Int32
 }
 
 // 编译时接口满足检查
@@ -37,15 +49,23 @@ func (m *mockGraphDB) BulkCreate(_ context.Context, _ string, nodes []assembler.
 	return m.bulkCreateErr
 }
 
-func (m *mockGraphDB) Upsert(_ context.Context, _ string, _ []assembler.Node, _ []assembler.Relation) error {
-	return nil
+func (m *mockGraphDB) Upsert(_ context.Context, _ string, nodes []assembler.Node, rels []assembler.Relation) error {
+	m.upsertNodes = append(m.upsertNodes, nodes...)
+	m.upsertRels = append(m.upsertRels, rels...)
+	return m.upsertErr
 }
 
-func (m *mockGraphDB) DeleteRelations(_ context.Context, _ string, _ []assembler.Relation) error {
-	return nil
+func (m *mockGraphDB) DeleteRelations(_ context.Context, _ string, rels []assembler.Relation) error {
+	m.deleteRelationsCalls = append(m.deleteRelationsCalls, rels)
+	m.deleteRelationsCount.Add(1)
+	return m.deleteRelationsErr
 }
 
-func (m *mockGraphDB) DeleteByURIs(_ context.Context, _ string, _ []string) error { return nil }
+func (m *mockGraphDB) DeleteByURIs(_ context.Context, _ string, uris []string) error {
+	m.deleteByURIsCalls = append(m.deleteByURIsCalls, uris)
+	m.deleteByURIsCount.Add(1)
+	return m.deleteByURIsErr
+}
 
 func (m *mockGraphDB) Query(_ context.Context, _ string, _ string, _ map[string]any) ([]map[string]any, error) {
 	return nil, nil
@@ -65,6 +85,8 @@ func (m *mockGraphDB) CloneDB(_ context.Context, _, _ string) error { return nil
 func (m *mockGraphDB) ListDBs(_ context.Context) ([]string, error) { return nil, nil }
 
 func (m *mockGraphDB) HasDB(_ context.Context, _ string) (bool, error) { return false, nil }
+
+func (m *mockGraphDB) EnsureIndexes(_ context.Context, _ []string) error { return nil }
 
 // ---------------------------------------------------------------------------
 // mockConnector — 可注入错误的 Connector mock

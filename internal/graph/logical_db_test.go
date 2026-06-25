@@ -61,6 +61,10 @@ func (m *mockLogicalDB) HasDB(_ context.Context, _ string) (bool, error) {
 	panic("not needed")
 }
 
+func (m *mockLogicalDB) EnsureIndexes(_ context.Context, _ []string) error {
+	panic("not needed")
+}
+
 // 编译时检查
 var _ GraphDB = (*mockLogicalDB)(nil)
 

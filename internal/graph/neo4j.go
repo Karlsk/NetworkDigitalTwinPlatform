@@ -68,9 +68,7 @@ type neo4jClient struct {
 
 // NewNeo4jClient 根据配置创建 Neo4j 客户端。
 // 注意：创建时不会实际建立网络连接，需调用 Ping 验证连通性。
-// 返回类型为 *neo4jClient（非 GraphDB 接口），因为 I-07 只实现部分方法，
-// 待后续任务完成全部方法后再改为接口返回类型。
-func NewNeo4jClient(cfg config.Neo4JConfig) (*neo4jClient, error) {
+func NewNeo4jClient(cfg config.Neo4JConfig) (GraphDB, error) {
 	driver, err := driverFactory(
 		cfg.URI,
 		neo4j.BasicAuth(cfg.User, cfg.Password, ""),

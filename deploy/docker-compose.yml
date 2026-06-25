@@ -1,19 +1,24 @@
 services:
   neo4j:
-    image: neo4j:2025.03-community
+    image: neo4j:2026.03.1
+    container_name: neo4j-twin
     ports:
-      - "7474:7474"   # Browser UI
-      - "7687:7687"   # Bolt protocol
-    environment:
-      NEO4J_AUTH: neo4j/password
-      # 允许大量数据导入的内存配置
-      NEO4J_server_memory_heap_initial__size: 512m
-      NEO4J_server_memory_heap_max__size: 1G
+      - "7474:7474"
+      - "7687:7687"
     volumes:
-      - neo4j_data:/data
-      - neo4j_logs:/logs
+      - ./neo4j-vol/data:/data
+      - ./neo4j-vol/logs:/logs
+      - ./neo4j-vol/import:/import
+      - ./neo4j-vol/plugins:/plugins
+    environment:
+      - NEO4J_AUTH=neo4j/password123
+      - NEO4J_PLUGINS=["apoc"]
+      - NEO4J_dbms_security_procedures_unrestricted=apoc.*,n10s.*
+      - NEO4J_dbms_security_procedures_allowlist=apoc.*,n10s.*
+      - NEO4J_server_config_strict__validation_enabled=false
+    restart: always
     healthcheck:
-      test: ["CMD", "cypher-shell", "-u", "neo4j", "-p", "password", "RETURN 1"]
+      test: ["CMD", "cypher-shell", "-u", "neo4j", "-p", "password123", "RETURN 1"]
       interval: 10s
       timeout: 5s
       retries: 5

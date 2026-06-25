@@ -1,4 +1,4 @@
-.PHONY: build test test-integration test-race lint docker-up docker-down pipeline-demo
+.PHONY: build test test-integration test-e2e test-race lint docker-up docker-down pipeline-demo
 
 build:
 	go build ./...
@@ -8,6 +8,9 @@ test:
 
 test-integration:
 	go test -tags=integration ./...
+
+test-e2e:
+	go test -tags=e2e -v -count=1 ./test/e2e/...
 
 test-race:
 	go test -race ./...

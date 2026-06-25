@@ -430,7 +430,8 @@ func TestFullSync_ConcurrentMutualExclusion(t *testing.T) {
 // concurrentMockGraphDB 用于并发测试的 GraphDB mock。
 type concurrentMockGraphDB struct {
 	mockGraphDB
-	onBulkCreate func()
+	onBulkCreate    func()
+	onDeleteByURIs  func()
 }
 
 func (m *concurrentMockGraphDB) BulkCreate(_ context.Context, _ string, nodes []assembler.Node, rels []assembler.Relation) error {
@@ -440,6 +441,15 @@ func (m *concurrentMockGraphDB) BulkCreate(_ context.Context, _ string, nodes []
 		m.onBulkCreate()
 	}
 	return m.bulkCreateErr
+}
+
+func (m *concurrentMockGraphDB) DeleteByURIs(_ context.Context, _ string, uris []string) error {
+	m.deleteByURIsCalls = append(m.deleteByURIsCalls, uris)
+	m.deleteByURIsCount.Add(1)
+	if m.onDeleteByURIs != nil {
+		m.onDeleteByURIs()
+	}
+	return m.deleteByURIsErr
 }
 
 // TestFullSync_LockReleaseOnError 验证错误时锁释放（defer unlock）。
@@ -522,5 +532,501 @@ func TestFullSync_EmptyRegistry(t *testing.T) {
 	// ClearDB 仍被调用
 	if len(gdb.clearDBCalls) != 1 {
 		t.Errorf("ClearDB calls = %d, want 1 (should still clear even with empty registry)", len(gdb.clearDBCalls))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// I-15: IncrementalSync 测试
+// ---------------------------------------------------------------------------
+
+// TestIncrementalSync_Update_Success 验证 update 事件正确走 Normalize → Assemble → Upsert 路径。
+func TestIncrementalSync_Update_Success(t *testing.T) {
+	reg := loadTestOntology(t)
+
+	registry := connector.NewConnectorRegistry()
+	norm := normalizer.NewNormalizer(reg)
+	asm := assembler.NewGraphAssembler(reg)
+	gdb := &mockGraphDB{}
+	lock := snapshot.NewGraphLock()
+
+	svc := NewSyncService(registry, norm, asm, gdb, lock, 10)
+
+	event := SyncEvent{
+		Action:     "update",
+		EntityType: "Device",
+		Data: []map[string]any{
+			{"serial_number": "SN001", "hostname": "router-01", "vendor": "Huawei", "model": "NE40E", "status": "Up"},
+		},
+	}
+
+	result, err := svc.IncrementalSync(context.Background(), event)
+	if err != nil {
+		t.Fatalf("IncrementalSync(update) error = %v", err)
+	}
+
+	if result.NodesCreated != 1 {
+		t.Errorf("NodesCreated = %d, want 1", result.NodesCreated)
+	}
+	if len(gdb.upsertNodes) != 1 {
+		t.Errorf("Upsert nodes = %d, want 1", len(gdb.upsertNodes))
+	}
+	if result.Duration <= 0 {
+		t.Errorf("Duration = %v, want > 0", result.Duration)
+	}
+}
+
+// TestIncrementalSync_Delete_Success 验证 delete 事件调用 DeleteByURIs。
+func TestIncrementalSync_Delete_Success(t *testing.T) {
+	reg := loadTestOntology(t)
+
+	registry := connector.NewConnectorRegistry()
+	norm := normalizer.NewNormalizer(reg)
+	asm := assembler.NewGraphAssembler(reg)
+	gdb := &mockGraphDB{}
+	lock := snapshot.NewGraphLock()
+
+	svc := NewSyncService(registry, norm, asm, gdb, lock, 10)
+
+	event := SyncEvent{
+		Action: "delete",
+		URIs:   []string{"device:SN001", "device:SN002"},
+	}
+
+	result, err := svc.IncrementalSync(context.Background(), event)
+	if err != nil {
+		t.Fatalf("IncrementalSync(delete) error = %v", err)
+	}
+
+	if len(gdb.deleteByURIsCalls) != 1 {
+		t.Fatalf("DeleteByURIs calls = %d, want 1", len(gdb.deleteByURIsCalls))
+	}
+	if len(gdb.deleteByURIsCalls[0]) != 2 {
+		t.Errorf("DeleteByURIs URIs count = %d, want 2", len(gdb.deleteByURIsCalls[0]))
+	}
+	if gdb.deleteByURIsCalls[0][0] != "device:SN001" {
+		t.Errorf("DeleteByURIs URIs[0] = %q, want %q", gdb.deleteByURIsCalls[0][0], "device:SN001")
+	}
+	if result.Duration <= 0 {
+		t.Errorf("Duration = %v, want > 0", result.Duration)
+	}
+}
+
+// TestIncrementalSync_DeleteRelation_Success 验证 delete_relation 事件调用 DeleteRelations。
+func TestIncrementalSync_DeleteRelation_Success(t *testing.T) {
+	reg := loadTestOntology(t)
+
+	registry := connector.NewConnectorRegistry()
+	norm := normalizer.NewNormalizer(reg)
+	asm := assembler.NewGraphAssembler(reg)
+	gdb := &mockGraphDB{}
+	lock := snapshot.NewGraphLock()
+
+	svc := NewSyncService(registry, norm, asm, gdb, lock, 10)
+
+	event := SyncEvent{
+		Action: "delete_relation",
+		Relations: []assembler.Relation{
+			{Type: "HAS_INTERFACE", From: "device:SN001", To: "iface:SN001_eth0"},
+		},
+	}
+
+	_, err := svc.IncrementalSync(context.Background(), event)
+	if err != nil {
+		t.Fatalf("IncrementalSync(delete_relation) error = %v", err)
+	}
+
+	if len(gdb.deleteRelationsCalls) != 1 {
+		t.Fatalf("DeleteRelations calls = %d, want 1", len(gdb.deleteRelationsCalls))
+	}
+	if len(gdb.deleteRelationsCalls[0]) != 1 {
+		t.Fatalf("DeleteRelations rels count = %d, want 1", len(gdb.deleteRelationsCalls[0]))
+	}
+	if gdb.deleteRelationsCalls[0][0].Type != "HAS_INTERFACE" {
+		t.Errorf("Relation type = %q, want HAS_INTERFACE", gdb.deleteRelationsCalls[0][0].Type)
+	}
+}
+
+// TestIncrementalSync_UnknownAction 验证未知 Action 返回 error。
+func TestIncrementalSync_UnknownAction(t *testing.T) {
+	reg := loadTestOntology(t)
+
+	registry := connector.NewConnectorRegistry()
+	norm := normalizer.NewNormalizer(reg)
+	asm := assembler.NewGraphAssembler(reg)
+	gdb := &mockGraphDB{}
+	lock := snapshot.NewGraphLock()
+
+	svc := NewSyncService(registry, norm, asm, gdb, lock, 10)
+
+	event := SyncEvent{Action: "invalid_action"}
+	_, err := svc.IncrementalSync(context.Background(), event)
+	if err == nil {
+		t.Fatal("IncrementalSync(invalid) should return error")
+	}
+}
+
+// TestIncrementalSync_NormalizerFailureTolerance 验证 update 中部分数据 normalize 失败不阻断。
+func TestIncrementalSync_NormalizerFailureTolerance(t *testing.T) {
+	reg := loadTestOntology(t)
+
+	registry := connector.NewConnectorRegistry()
+	norm := normalizer.NewNormalizer(reg)
+	asm := assembler.NewGraphAssembler(reg)
+	gdb := &mockGraphDB{}
+	lock := snapshot.NewGraphLock()
+
+	svc := NewSyncService(registry, norm, asm, gdb, lock, 10)
+
+	event := SyncEvent{
+		Action:     "update",
+		EntityType: "Device",
+		Data: []map[string]any{
+			{"serial_number": "SN001", "hostname": "router-01", "vendor": "Huawei", "model": "NE40E", "status": "Up"},
+			{"serial_number": "", "hostname": "bad-device"}, // 缺 stableKey
+		},
+	}
+
+	result, err := svc.IncrementalSync(context.Background(), event)
+	if err != nil {
+		t.Fatalf("IncrementalSync() error = %v, want nil (normalizer failure tolerated)", err)
+	}
+
+	// 只有合法数据被 Upsert
+	if result.NodesCreated != 1 {
+		t.Errorf("NodesCreated = %d, want 1 (bad data skipped)", result.NodesCreated)
+	}
+}
+
+// TestIncrementalSync_UpsertError 验证 Upsert 错误传播。
+func TestIncrementalSync_UpsertError(t *testing.T) {
+	reg := loadTestOntology(t)
+
+	wantErr := errors.New("neo4j upsert failed")
+	gdb := &mockGraphDB{upsertErr: wantErr}
+
+	registry := connector.NewConnectorRegistry()
+	norm := normalizer.NewNormalizer(reg)
+	asm := assembler.NewGraphAssembler(reg)
+	lock := snapshot.NewGraphLock()
+
+	svc := NewSyncService(registry, norm, asm, gdb, lock, 10)
+
+	event := SyncEvent{
+		Action:     "update",
+		EntityType: "Device",
+		Data: []map[string]any{
+			{"serial_number": "SN001", "hostname": "router-01", "vendor": "Huawei", "model": "NE40E", "status": "Up"},
+		},
+	}
+
+	_, err := svc.IncrementalSync(context.Background(), event)
+	if err == nil {
+		t.Fatal("IncrementalSync() should return error when Upsert fails")
+	}
+	if !errors.Is(err, wantErr) {
+		t.Errorf("error should wrap original, got: %v", err)
+	}
+}
+
+// TestIncrementalSync_DeleteByURIsError 验证 DeleteByURIs 错误传播。
+func TestIncrementalSync_DeleteByURIsError(t *testing.T) {
+	reg := loadTestOntology(t)
+
+	wantErr := errors.New("neo4j delete failed")
+	gdb := &mockGraphDB{deleteByURIsErr: wantErr}
+
+	registry := connector.NewConnectorRegistry()
+	norm := normalizer.NewNormalizer(reg)
+	asm := assembler.NewGraphAssembler(reg)
+	lock := snapshot.NewGraphLock()
+
+	svc := NewSyncService(registry, norm, asm, gdb, lock, 10)
+
+	event := SyncEvent{
+		Action: "delete",
+		URIs:   []string{"device:SN001"},
+	}
+
+	_, err := svc.IncrementalSync(context.Background(), event)
+	if err == nil {
+		t.Fatal("IncrementalSync() should return error when DeleteByURIs fails")
+	}
+	if !errors.Is(err, wantErr) {
+		t.Errorf("error should wrap original, got: %v", err)
+	}
+}
+
+// TestIncrementalSync_DeleteRelationsError 验证 DeleteRelations 错误传播。
+func TestIncrementalSync_DeleteRelationsError(t *testing.T) {
+	reg := loadTestOntology(t)
+
+	wantErr := errors.New("neo4j delete relations failed")
+	gdb := &mockGraphDB{deleteRelationsErr: wantErr}
+
+	registry := connector.NewConnectorRegistry()
+	norm := normalizer.NewNormalizer(reg)
+	asm := assembler.NewGraphAssembler(reg)
+	lock := snapshot.NewGraphLock()
+
+	svc := NewSyncService(registry, norm, asm, gdb, lock, 10)
+
+	event := SyncEvent{
+		Action: "delete_relation",
+		Relations: []assembler.Relation{
+			{Type: "HAS_INTERFACE", From: "device:SN001", To: "iface:eth0"},
+		},
+	}
+
+	_, err := svc.IncrementalSync(context.Background(), event)
+	if err == nil {
+		t.Fatal("IncrementalSync() should return error when DeleteRelations fails")
+	}
+	if !errors.Is(err, wantErr) {
+		t.Errorf("error should wrap original, got: %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// I-15: HandleWebhook 测试
+// ---------------------------------------------------------------------------
+
+// TestHandleWebhook_EnqueueSuccess 验证入队成功返回 nil。
+func TestHandleWebhook_EnqueueSuccess(t *testing.T) {
+	reg := loadTestOntology(t)
+
+	registry := connector.NewConnectorRegistry()
+	norm := normalizer.NewNormalizer(reg)
+	asm := assembler.NewGraphAssembler(reg)
+	gdb := &mockGraphDB{}
+	lock := snapshot.NewGraphLock()
+
+	svc := NewSyncService(registry, norm, asm, gdb, lock, 2)
+
+	event := SyncEvent{Action: "delete", URIs: []string{"device:SN001"}}
+	err := svc.HandleWebhook(event)
+	if err != nil {
+		t.Fatalf("HandleWebhook() error = %v, want nil", err)
+	}
+
+	// 验证事件在 channel 中
+	select {
+	case received := <-svc.eventChan:
+		if received.Action != "delete" {
+			t.Errorf("received action = %q, want delete", received.Action)
+		}
+	default:
+		t.Fatal("event not found in channel")
+	}
+}
+
+// TestHandleWebhook_ChannelFull 验证 channel 满时返回 error。
+func TestHandleWebhook_ChannelFull(t *testing.T) {
+	reg := loadTestOntology(t)
+
+	registry := connector.NewConnectorRegistry()
+	norm := normalizer.NewNormalizer(reg)
+	asm := assembler.NewGraphAssembler(reg)
+	gdb := &mockGraphDB{}
+	lock := snapshot.NewGraphLock()
+
+	svc := NewSyncService(registry, norm, asm, gdb, lock, 1)
+
+	// 填满 channel
+	svc.eventChan <- SyncEvent{Action: "delete"}
+
+	// 再次入队应失败
+	err := svc.HandleWebhook(SyncEvent{Action: "delete"})
+	if err == nil {
+		t.Fatal("HandleWebhook() should return error when channel is full")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// I-15: StartConsumer 测试
+// ---------------------------------------------------------------------------
+
+// TestStartConsumer_ProcessesEvents 验证消费者协程处理事件。
+func TestStartConsumer_ProcessesEvents(t *testing.T) {
+	reg := loadTestOntology(t)
+
+	registry := connector.NewConnectorRegistry()
+	norm := normalizer.NewNormalizer(reg)
+	asm := assembler.NewGraphAssembler(reg)
+	gdb := &mockGraphDB{}
+	lock := snapshot.NewGraphLock()
+
+	svc := NewSyncService(registry, norm, asm, gdb, lock, 10)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	svc.StartConsumer(ctx)
+
+	// 发送 2 个 delete 事件
+	svc.eventChan <- SyncEvent{Action: "delete", URIs: []string{"device:SN001"}}
+	svc.eventChan <- SyncEvent{Action: "delete", URIs: []string{"device:SN002"}}
+
+	// 等待处理完成
+	deadline := time.After(2 * time.Second)
+	for {
+		if gdb.deleteByURIsCount.Load() >= 2 {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("consumer processed %d events, want 2", gdb.deleteByURIsCount.Load())
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+}
+
+// TestStartConsumer_SerialProcessing 验证消费者串行处理（同一时刻最多 1 个事件在处理）。
+func TestStartConsumer_SerialProcessing(t *testing.T) {
+	reg := loadTestOntology(t)
+
+	var activeCount int32
+	var maxActive int32
+
+	gdb := &concurrentMockGraphDB{
+		onDeleteByURIs: func() {
+			current := atomic.AddInt32(&activeCount, 1)
+			for {
+				old := atomic.LoadInt32(&maxActive)
+				if current <= old {
+					break
+				}
+				if atomic.CompareAndSwapInt32(&maxActive, old, current) {
+					break
+				}
+			}
+			time.Sleep(50 * time.Millisecond)
+			atomic.AddInt32(&activeCount, -1)
+		},
+	}
+
+	registry := connector.NewConnectorRegistry()
+	norm := normalizer.NewNormalizer(reg)
+	asm := assembler.NewGraphAssembler(reg)
+	lock := snapshot.NewGraphLock()
+
+	svc := NewSyncService(registry, norm, asm, gdb, lock, 10)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	svc.StartConsumer(ctx)
+
+	// 发送 3 个事件
+	for i := 0; i < 3; i++ {
+		svc.eventChan <- SyncEvent{Action: "delete", URIs: []string{"device:SN00" + string(rune('1'+i))}}
+	}
+
+	// 等待处理完成
+	deadline := time.After(2 * time.Second)
+	for {
+		if gdb.deleteByURIsCount.Load() >= 3 {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("consumer processed %d/3 events", gdb.deleteByURIsCount.Load())
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+
+	if max := atomic.LoadInt32(&maxActive); max > 1 {
+		t.Errorf("max concurrent processing = %d, want <= 1 (serial processing violated)", max)
+	}
+}
+
+// TestStartConsumer_LockAcquiredPerEvent 验证消费者处理事件时持有 GraphLock。
+func TestStartConsumer_LockAcquiredPerEvent(t *testing.T) {
+	reg := loadTestOntology(t)
+
+	processing := make(chan struct{})
+
+	gdb := &concurrentMockGraphDB{
+		onDeleteByURIs: func() {
+			close(processing)
+			time.Sleep(100 * time.Millisecond)
+		},
+	}
+
+	registry := connector.NewConnectorRegistry()
+	norm := normalizer.NewNormalizer(reg)
+	asm := assembler.NewGraphAssembler(reg)
+	lock := snapshot.NewGraphLock()
+
+	svc := NewSyncService(registry, norm, asm, gdb, lock, 10)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	svc.StartConsumer(ctx)
+
+	svc.eventChan <- SyncEvent{Action: "delete", URIs: []string{"device:SN001"}}
+
+	// 等待事件开始处理
+	select {
+	case <-processing:
+	case <-time.After(2 * time.Second):
+		t.Fatal("consumer did not start processing within timeout")
+	}
+
+	// 尝试获取锁 — 应被阻塞（消费者持有锁）
+	acquired := make(chan struct{})
+	go func() {
+		lock.Lock()
+		close(acquired)
+		lock.Unlock()
+	}()
+
+	select {
+	case <-acquired:
+		t.Fatal("external Lock should block while consumer holds the lock")
+	case <-time.After(50 * time.Millisecond):
+		// 预期：被阻塞
+	}
+
+	// 等待处理完成，锁应被释放
+	select {
+	case <-acquired:
+		// 成功：锁在处理完成后释放
+	case <-time.After(2 * time.Second):
+		t.Fatal("lock not released after consumer finished processing")
+	}
+}
+
+// TestStartConsumer_StopsOnContextCancel 验证 context 取消后消费者停止。
+func TestStartConsumer_StopsOnContextCancel(t *testing.T) {
+	reg := loadTestOntology(t)
+
+	registry := connector.NewConnectorRegistry()
+	norm := normalizer.NewNormalizer(reg)
+	asm := assembler.NewGraphAssembler(reg)
+	gdb := &mockGraphDB{}
+	lock := snapshot.NewGraphLock()
+
+	svc := NewSyncService(registry, norm, asm, gdb, lock, 10)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	svc.StartConsumer(ctx)
+
+	// 取消 context
+	cancel()
+
+	// 消费者应在短时间内停止（通过检测 channel 关闭后 goroutine 退出）
+	// 无法直接检测 goroutine 退出，但可以通过发送事件来验证消费者不再处理
+	time.Sleep(50 * time.Millisecond)
+
+	// 发送事件到 channel（此时无消费者处理）
+	svc.eventChan <- SyncEvent{Action: "delete", URIs: []string{"device:SN001"}}
+
+	// 等待一小段时间，验证事件未被处理
+	time.Sleep(100 * time.Millisecond)
+	if len(gdb.deleteByURIsCalls) != 0 {
+		t.Errorf("consumer should not process events after context cancel, but processed %d", len(gdb.deleteByURIsCalls))
 	}
 }

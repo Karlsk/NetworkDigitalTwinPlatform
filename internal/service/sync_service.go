@@ -3,6 +3,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -137,4 +138,111 @@ func (s *SyncService) FullSync(ctx context.Context) (*SyncResult, error) {
 		Warnings:           warnings,
 		Duration:           time.Since(start),
 	}, nil
+}
+
+// IncrementalSync 增量同步：根据 event.Action 分发处理。
+// 本方法不加锁，由 StartConsumer 在消费循环中管理 GraphLock。
+// Action 支持: "update" (MERGE), "delete" (DETACH DELETE), "delete_relation" (仅删除关系)。
+func (s *SyncService) IncrementalSync(ctx context.Context, event SyncEvent) (*SyncResult, error) {
+	start := time.Now()
+
+	switch event.Action {
+	case "update":
+		// 1. 构造 Resource
+		resources := make([]connector.Resource, 0, len(event.Data))
+		for _, data := range event.Data {
+			resources = append(resources, connector.Resource{
+				Kind:       event.EntityType,
+				Properties: data,
+			})
+		}
+
+		// 2. Normalizer（单条失败 slog.Warn 跳过，不阻断）
+		var normalized []normalizer.NormalizedResource
+		for _, r := range resources {
+			norm, err := s.normalizer.Normalize(r)
+			if err != nil {
+				slog.Warn("normalize failed in incremental sync",
+					"kind", r.Kind, "error", err)
+				continue
+			}
+			normalized = append(normalized, *norm)
+		}
+
+		// 3. Assembler
+		model, warnings, err := s.assembler.Assemble(normalized)
+		if err != nil {
+			return nil, fmt.Errorf("assemble graph: %w", err)
+		}
+
+		// 4. Upsert (MERGE + SET +=)
+		if err := s.graph.Upsert(ctx, "default", model.Nodes, model.Relations); err != nil {
+			return nil, fmt.Errorf("upsert: %w", err)
+		}
+
+		return &SyncResult{
+			NodesCreated:       len(model.Nodes),
+			RelationsCreated:  len(model.Relations),
+			OrphanEdgesSkipped: len(warnings),
+			Warnings:           warnings,
+			Duration:           time.Since(start),
+		}, nil
+
+	case "delete":
+		if err := s.graph.DeleteByURIs(ctx, "default", event.URIs); err != nil {
+			return nil, fmt.Errorf("delete by uris: %w", err)
+		}
+		return &SyncResult{Duration: time.Since(start)}, nil
+
+	case "delete_relation":
+		if err := s.graph.DeleteRelations(ctx, "default", event.Relations); err != nil {
+			return nil, fmt.Errorf("delete relations: %w", err)
+		}
+		return &SyncResult{Duration: time.Since(start)}, nil
+
+	default:
+		return nil, fmt.Errorf("unknown action: %s", event.Action)
+	}
+}
+
+// StartConsumer 启动消费者协程，串行消费 eventChan 中的事件。
+// 每个事件处理前获取 GraphLock 写锁，处理后释放，保证与 FullSync/Restore 互斥。
+// context 取消后消费者停止，不再处理新事件。
+func (s *SyncService) StartConsumer(ctx context.Context) {
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				slog.Info("consumer stopped", "reason", ctx.Err())
+				return
+			case event := <-s.eventChan:
+				s.lock.Lock()
+				result, err := s.IncrementalSync(ctx, event)
+				s.lock.Unlock()
+
+				if err != nil {
+					slog.Error("incremental sync failed",
+						"action", event.Action, "error", err)
+				} else {
+					slog.Info("incremental sync completed",
+						"action", event.Action,
+						"nodes", result.NodesCreated,
+						"duration_ms", result.Duration.Milliseconds(),
+					)
+				}
+			}
+		}
+	}()
+}
+
+// HandleWebhook Webhook Handler，非阻塞写入 eventChan，立即返回。
+// 入队成功返回 nil（外部应返回 202 Accepted）。
+// channel 满时返回 error（外部应返回 503 Service Unavailable）。
+func (s *SyncService) HandleWebhook(event SyncEvent) error {
+	select {
+	case s.eventChan <- event:
+		return nil
+	default:
+		return errors.New("event queue full")
+	}
 }
