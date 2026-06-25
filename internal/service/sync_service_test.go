@@ -1,10 +1,20 @@
 package service
 
 import (
+	"context"
+	"errors"
+	"os"
+	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"gitlab.com/pml/network-digital-twin/internal/assembler"
+	"gitlab.com/pml/network-digital-twin/internal/connector"
+	"gitlab.com/pml/network-digital-twin/internal/connector/mock"
+	"gitlab.com/pml/network-digital-twin/internal/normalizer"
+	"gitlab.com/pml/network-digital-twin/internal/schema"
+	"gitlab.com/pml/network-digital-twin/internal/snapshot"
 )
 
 func TestSyncResultFields(t *testing.T) {
@@ -100,5 +110,417 @@ func TestSyncEventDeleteRelations(t *testing.T) {
 	}
 	if e.Relations[0].Type != "HAS_INTERFACE" {
 		t.Errorf("Relations[0].Type = %q, want %q", e.Relations[0].Type, "HAS_INTERFACE")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// SyncService 构造函数和 FullSync 测试
+// ---------------------------------------------------------------------------
+
+// TestNewSyncService 验证 SyncService 构造函数。
+func TestNewSyncService(t *testing.T) {
+	reg := connector.NewConnectorRegistry()
+	norm := normalizer.NewNormalizer(schema.NewSchemaRegistry())
+	asm := assembler.NewGraphAssembler(schema.NewSchemaRegistry())
+	gdb := &mockGraphDB{}
+	lock := snapshot.NewGraphLock()
+
+	svc := NewSyncService(reg, norm, asm, gdb, lock, 10)
+	if svc == nil {
+		t.Fatal("NewSyncService() returned nil")
+	}
+}
+
+// TestFullSync_Success 验证全量同步成功路径。
+// 使用真实 ontology + testdata/mock_netbox 数据。
+func TestFullSync_Success(t *testing.T) {
+	reg := loadTestOntology(t)
+
+	dataDir := filepath.Join("..", "..", "testdata", "mock_netbox")
+	if _, err := os.Stat(dataDir); os.IsNotExist(err) {
+		t.Skipf("testdata/mock_netbox not found at %s, skipping", dataDir)
+	}
+
+	// 创建真实 MockConnector（读取 JSON 文件）
+	conn := mock.NewMockConnector("mock-netbox", dataDir, []string{
+		"Device", "Interface", "ISIS", "Link", "Network_Slice",
+	})
+	registry := connector.NewConnectorRegistry()
+	registry.Register(conn)
+
+	norm := normalizer.NewNormalizer(reg)
+	asm := assembler.NewGraphAssembler(reg)
+	gdb := &mockGraphDB{}
+	lock := snapshot.NewGraphLock()
+
+	svc := NewSyncService(registry, norm, asm, gdb, lock, 10)
+	result, err := svc.FullSync(context.Background())
+
+	if err != nil {
+		t.Fatalf("FullSync() error = %v", err)
+	}
+
+	// 验证 SyncResult 统计
+	// Device:3 + Interface:12 + ISIS:3 + Link:2 + Network_Slice:1 = 21
+	expectedNodes := 21
+	if result.NodesCreated != expectedNodes {
+		t.Errorf("NodesCreated = %d, want %d", result.NodesCreated, expectedNodes)
+	}
+
+	// HAS_INTERFACE:12 + CONNECTS_TO:2 + RUNS_ON:3 + ENDPOINT:4 = 21
+	expectedRels := 21
+	if result.RelationsCreated != expectedRels {
+		t.Errorf("RelationsCreated = %d, want %d", result.RelationsCreated, expectedRels)
+	}
+
+	if result.OrphanEdgesSkipped != 0 {
+		t.Errorf("OrphanEdgesSkipped = %d, want 0", result.OrphanEdgesSkipped)
+	}
+
+	if result.Duration <= 0 {
+		t.Errorf("Duration = %v, want > 0", result.Duration)
+	}
+
+	// 验证 ClearDB 被调用
+	if len(gdb.clearDBCalls) != 1 || gdb.clearDBCalls[0] != "default" {
+		t.Errorf("ClearDB calls = %v, want [default]", gdb.clearDBCalls)
+	}
+
+	// 验证 BulkCreate 接收到正确数量的数据
+	if len(gdb.bulkCreateNodes) != expectedNodes {
+		t.Errorf("BulkCreate nodes = %d, want %d", len(gdb.bulkCreateNodes), expectedNodes)
+	}
+	if len(gdb.bulkCreateRels) != expectedRels {
+		t.Errorf("BulkCreate rels = %d, want %d", len(gdb.bulkCreateRels), expectedRels)
+	}
+}
+
+// TestFullSync_ConnectorFailureTolerance 验证单个 Connector 失败不阻断整个同步。
+func TestFullSync_ConnectorFailureTolerance(t *testing.T) {
+	reg := loadTestOntology(t)
+
+	// Connector A: 正常返回数据
+	connA := &mockConnector{
+		name:        "conn-a",
+		entityTypes: []string{"Device"},
+		resources: map[string][]connector.Resource{
+			"Device": {
+				{Kind: "Device", ID: "1", Properties: map[string]any{
+					"serial_number": "SN001", "hostname": "router-01", "vendor": "Huawei",
+					"model": "NE40E", "status": "Up",
+				}},
+			},
+		},
+	}
+
+	// Connector B: Collect 返回错误
+	connB := &mockConnector{
+		name:        "conn-b",
+		entityTypes: []string{"Device"},
+		collectErr:  errors.New("connection refused"),
+	}
+
+	registry := connector.NewConnectorRegistry()
+	registry.Register(connA)
+	registry.Register(connB)
+
+	norm := normalizer.NewNormalizer(reg)
+	asm := assembler.NewGraphAssembler(reg)
+	gdb := &mockGraphDB{}
+	lock := snapshot.NewGraphLock()
+
+	svc := NewSyncService(registry, norm, asm, gdb, lock, 10)
+	result, err := svc.FullSync(context.Background())
+
+	// 不应返回错误（单个 Connector 失败被容忍）
+	if err != nil {
+		t.Fatalf("FullSync() error = %v, want nil (connector failure tolerated)", err)
+	}
+
+	// 只统计 Connector A 的数据（1 个 Device）
+	if result.NodesCreated != 1 {
+		t.Errorf("NodesCreated = %d, want 1 (only conn-a data)", result.NodesCreated)
+	}
+}
+
+// TestFullSync_NormalizerFailureTolerance 验证 Normalizer 失败不阻断同步。
+func TestFullSync_NormalizerFailureTolerance(t *testing.T) {
+	reg := loadTestOntology(t)
+
+	// Connector 返回混合数据：合法 Device + 不合法 Kind（不存在于 ontology）
+	conn := &mockConnector{
+		name:        "mixed-conn",
+		entityTypes: []string{"Device", "UnknownType"},
+		resources: map[string][]connector.Resource{
+			"Device": {
+				{Kind: "Device", ID: "1", Properties: map[string]any{
+					"serial_number": "SN001", "hostname": "router-01", "vendor": "Huawei",
+					"model": "NE40E", "status": "Up",
+				}},
+			},
+			"UnknownType": {
+				{Kind: "UnknownType", ID: "x1", Properties: map[string]any{"name": "unknown"}},
+			},
+		},
+	}
+
+	registry := connector.NewConnectorRegistry()
+	registry.Register(conn)
+
+	norm := normalizer.NewNormalizer(reg)
+	asm := assembler.NewGraphAssembler(reg)
+	gdb := &mockGraphDB{}
+	lock := snapshot.NewGraphLock()
+
+	svc := NewSyncService(registry, norm, asm, gdb, lock, 10)
+	result, err := svc.FullSync(context.Background())
+
+	// 不应返回错误（UnknownType 被 Normalizer 跳过）
+	if err != nil {
+		t.Fatalf("FullSync() error = %v, want nil (normalizer failure tolerated)", err)
+	}
+
+	// 只统计合法 Device 数据（1 个节点）
+	if result.NodesCreated != 1 {
+		t.Errorf("NodesCreated = %d, want 1 (only valid Device)", result.NodesCreated)
+	}
+}
+
+// TestFullSync_ClearDBError 验证 ClearDB 错误传播。
+func TestFullSync_ClearDBError(t *testing.T) {
+	reg := loadTestOntology(t)
+
+	wantErr := errors.New("neo4j connection refused")
+	gdb := &mockGraphDB{clearDBErr: wantErr}
+
+	registry := connector.NewConnectorRegistry()
+	norm := normalizer.NewNormalizer(reg)
+	asm := assembler.NewGraphAssembler(reg)
+	lock := snapshot.NewGraphLock()
+
+	svc := NewSyncService(registry, norm, asm, gdb, lock, 10)
+	_, err := svc.FullSync(context.Background())
+
+	// 应返回错误
+	if err == nil {
+		t.Fatal("FullSync() should return error when ClearDB fails")
+	}
+	if !errors.Is(err, wantErr) {
+		t.Errorf("error should wrap original error, got: %v", err)
+	}
+
+	// BulkCreate 不应被调用
+	if gdb.bulkCreateNodes != nil {
+		t.Errorf("BulkCreate should not be called after ClearDB failure, got %d nodes", len(gdb.bulkCreateNodes))
+	}
+}
+
+// TestFullSync_BulkCreateError 验证 BulkCreate 错误传播。
+func TestFullSync_BulkCreateError(t *testing.T) {
+	reg := loadTestOntology(t)
+
+	wantErr := errors.New("neo4j write timeout")
+	gdb := &mockGraphDB{bulkCreateErr: wantErr}
+
+	// 注册一个有数据的 connector
+	conn := &mockConnector{
+		name:        "test-conn",
+		entityTypes: []string{"Device"},
+		resources: map[string][]connector.Resource{
+			"Device": {
+				{Kind: "Device", ID: "1", Properties: map[string]any{
+					"serial_number": "SN001", "hostname": "router-01", "vendor": "Huawei",
+					"model": "NE40E", "status": "Up",
+				}},
+			},
+		},
+	}
+	registry := connector.NewConnectorRegistry()
+	registry.Register(conn)
+
+	norm := normalizer.NewNormalizer(reg)
+	asm := assembler.NewGraphAssembler(reg)
+	lock := snapshot.NewGraphLock()
+
+	svc := NewSyncService(registry, norm, asm, gdb, lock, 10)
+	_, err := svc.FullSync(context.Background())
+
+	// 应返回错误
+	if err == nil {
+		t.Fatal("FullSync() should return error when BulkCreate fails")
+	}
+	if !errors.Is(err, wantErr) {
+		t.Errorf("error should wrap original error, got: %v", err)
+	}
+}
+
+// TestFullSync_ConcurrentMutualExclusion 验证并发 FullSync 互斥。
+func TestFullSync_ConcurrentMutualExclusion(t *testing.T) {
+	reg := loadTestOntology(t)
+
+	// 使用 atomic 计数器跟踪并发度
+	var activeCount int32
+	var maxActive int32
+
+	// 创建特殊的 mockGraphDB，在 BulkCreate 中跟踪并发度
+	gdb := &concurrentMockGraphDB{
+		onBulkCreate: func() {
+			current := atomic.AddInt32(&activeCount, 1)
+			// 更新最大并发数
+			for {
+				old := atomic.LoadInt32(&maxActive)
+				if current <= old {
+					break
+				}
+				if atomic.CompareAndSwapInt32(&maxActive, old, current) {
+					break
+				}
+			}
+			time.Sleep(50 * time.Millisecond) // 模拟工作负载
+			atomic.AddInt32(&activeCount, -1)
+		},
+	}
+
+	// 注册一个有数据的 connector
+	conn := &mockConnector{
+		name:        "test-conn",
+		entityTypes: []string{"Device"},
+		resources: map[string][]connector.Resource{
+			"Device": {
+				{Kind: "Device", ID: "1", Properties: map[string]any{
+					"serial_number": "SN001", "hostname": "router-01", "vendor": "Huawei",
+					"model": "NE40E", "status": "Up",
+				}},
+			},
+		},
+	}
+	registry := connector.NewConnectorRegistry()
+	registry.Register(conn)
+
+	norm := normalizer.NewNormalizer(reg)
+	asm := assembler.NewGraphAssembler(reg)
+	lock := snapshot.NewGraphLock()
+
+	svc := NewSyncService(registry, norm, asm, gdb, lock, 10)
+
+	// 启动两个 goroutine 同时调用 FullSync
+	done := make(chan error, 2)
+	go func() {
+		_, err := svc.FullSync(context.Background())
+		done <- err
+	}()
+	go func() {
+		_, err := svc.FullSync(context.Background())
+		done <- err
+	}()
+
+	// 等待两个都完成
+	for i := 0; i < 2; i++ {
+		if err := <-done; err != nil {
+			t.Errorf("FullSync() goroutine %d error = %v", i, err)
+		}
+	}
+
+	// 验证最大并发数始终 <= 1
+	if max := atomic.LoadInt32(&maxActive); max > 1 {
+		t.Errorf("max concurrent FullSync = %d, want <= 1 (mutual exclusion failed)", max)
+	}
+}
+
+// concurrentMockGraphDB 用于并发测试的 GraphDB mock。
+type concurrentMockGraphDB struct {
+	mockGraphDB
+	onBulkCreate func()
+}
+
+func (m *concurrentMockGraphDB) BulkCreate(_ context.Context, _ string, nodes []assembler.Node, rels []assembler.Relation) error {
+	m.bulkCreateNodes = nodes
+	m.bulkCreateRels = rels
+	if m.onBulkCreate != nil {
+		m.onBulkCreate()
+	}
+	return m.bulkCreateErr
+}
+
+// TestFullSync_LockReleaseOnError 验证错误时锁释放（defer unlock）。
+func TestFullSync_LockReleaseOnError(t *testing.T) {
+	reg := loadTestOntology(t)
+
+	gdb := &mockGraphDB{bulkCreateErr: errors.New("write failed")}
+
+	conn := &mockConnector{
+		name:        "test-conn",
+		entityTypes: []string{"Device"},
+		resources: map[string][]connector.Resource{
+			"Device": {
+				{Kind: "Device", ID: "1", Properties: map[string]any{
+					"serial_number": "SN001", "hostname": "router-01", "vendor": "Huawei",
+					"model": "NE40E", "status": "Up",
+				}},
+			},
+		},
+	}
+	registry := connector.NewConnectorRegistry()
+	registry.Register(conn)
+
+	norm := normalizer.NewNormalizer(reg)
+	asm := assembler.NewGraphAssembler(reg)
+	lock := snapshot.NewGraphLock()
+
+	svc := NewSyncService(registry, norm, asm, gdb, lock, 10)
+	_, err := svc.FullSync(context.Background())
+
+	// 确认 FullSync 返回错误
+	if err == nil {
+		t.Fatal("FullSync() should return error")
+	}
+
+	// 验证锁已释放：立即获取 Lock 应成功（1 秒超时检测死锁）
+	lockDone := make(chan struct{})
+	go func() {
+		lock.Lock()
+		close(lockDone)
+		lock.Unlock()
+	}()
+
+	select {
+	case <-lockDone:
+		// 成功：锁已释放
+	case <-time.After(1 * time.Second):
+		t.Fatal("Lock not released after FullSync error (possible deadlock)")
+	}
+}
+
+// TestFullSync_EmptyRegistry 验证空注册表场景。
+func TestFullSync_EmptyRegistry(t *testing.T) {
+	reg := loadTestOntology(t)
+
+	// 不注册任何 connector
+	registry := connector.NewConnectorRegistry()
+
+	norm := normalizer.NewNormalizer(reg)
+	asm := assembler.NewGraphAssembler(reg)
+	gdb := &mockGraphDB{}
+	lock := snapshot.NewGraphLock()
+
+	svc := NewSyncService(registry, norm, asm, gdb, lock, 10)
+	result, err := svc.FullSync(context.Background())
+
+	// 不应返回错误
+	if err != nil {
+		t.Fatalf("FullSync() error = %v", err)
+	}
+
+	// 统计为零
+	if result.NodesCreated != 0 {
+		t.Errorf("NodesCreated = %d, want 0", result.NodesCreated)
+	}
+	if result.RelationsCreated != 0 {
+		t.Errorf("RelationsCreated = %d, want 0", result.RelationsCreated)
+	}
+
+	// ClearDB 仍被调用
+	if len(gdb.clearDBCalls) != 1 {
+		t.Errorf("ClearDB calls = %d, want 1 (should still clear even with empty registry)", len(gdb.clearDBCalls))
 	}
 }

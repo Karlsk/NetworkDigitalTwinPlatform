@@ -9,6 +9,7 @@ dist/
 
 # Build output
 build/
+server
 
 # Test
 *.test
