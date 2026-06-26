@@ -1,4 +1,4 @@
-.PHONY: build test test-integration test-e2e test-race lint docker-up docker-down pipeline-demo
+.PHONY: build test test-integration test-e2e test-race lint docker-up docker-down pipeline-demo mcp-server mcp-client
 
 build:
 	go build ./...
@@ -26,3 +26,9 @@ docker-down:
 
 pipeline-demo:
 	go run cmd/pipeline-demo/main.go
+
+mcp-server:
+	go run cmd/server/main.go
+
+mcp-client:
+	go run cmd/mcp-client/main.go
