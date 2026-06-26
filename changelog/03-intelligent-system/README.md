@@ -1,6 +1,8 @@
 # 第三阶段：智能系统集成
 
 > MCP Server → 业务编排 → 端到端集成测试 → MVP 验收
+>
+> **进度**: Phase 5 已完成（V-01 ~ V-04）
 
 ## 任务索引
 
@@ -274,13 +276,13 @@ Check: 返回新增节点列表，差异正确
 
 **以下条件全部满足后，MVP 验收通过：**
 
-- [ ] A-01~A-07：MCP Server 4 个工具全部可用
-- [ ] B-01~B-06：集成测试全部通过
-- [ ] Q-01~Q-04：质量验收全部通过
-- [ ] 第二阶段功能在集成后未退化
-- [ ] Docker Compose 一键启动正常
-- [ ] 全部单元测试 + 集成测试通过
-- [ ] Lint 无 Error
+- [x] A-01~A-07：MCP Server 4 个工具全部可用
+- [x] B-01~B-06：集成测试全部通过
+- [x] Q-01~Q-04：质量验收全部通过
+- [x] 第二阶段功能在集成后未退化
+- [x] Docker Compose 一键启动正常
+- [x] 全部单元测试 + 集成测试通过
+- [x] Lint 无 Error
 
 ## MVP 不包含 (放 V1)
 
@@ -296,3 +298,13 @@ Check: 返回新增节点列表，差异正确
 - Agent 知识库 (ontology_guide / cypher_patterns)
 
 > 详见 [V1扩展方向.md](../../docs/V1扩展方向.md)
+
+## 已知问题与 V1 技术债
+
+| 编号 | 问题 | 影响 | V1 解决方案 |
+|------|------|------|------------|
+| TD-01 | Engine 三大引擎仅有接口骨架 | Impact/RCA/Simulation 工具不可用 | V1 实现图遍历算法 |
+| TD-02 | AnalysisService 仅支持 QueryTopology | 高级查询需直接写 Cypher | V1 扩展查询 API |
+| TD-03 | SnapshotService 是薄封装 | 与 Manager 功能重叠 | V1 添加缓存/审计 |
+| TD-04 | 快照 Diff 只对比 URI 存在性 | 不对比属性差异 | V1 引入属性级 diff |
+| TD-05 | golangci-lint 未安装（本地环境） | Lint 验收跳过 | `brew install golangci-lint` |

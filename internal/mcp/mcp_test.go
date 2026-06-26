@@ -8,8 +8,6 @@ import (
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"gitlab.com/pml/network-digital-twin/internal/assembler"
-	"gitlab.com/pml/network-digital-twin/internal/graph"
 	"gitlab.com/pml/network-digital-twin/internal/service"
 	"gitlab.com/pml/network-digital-twin/internal/snapshot"
 )
@@ -18,40 +16,20 @@ import (
 // Mock 实现
 // ---------------------------------------------------------------------------
 
-// mockGraphDB 实现 graph.GraphDB 接口，Query 返回可配置数据。
-type mockGraphDB struct {
-	queryResult []map[string]any
+// mockAnalysisService 实现 analysisService 接口。
+type mockAnalysisService struct {
+	queryResult *service.TopologyResult
 	queryErr    error
 }
 
-var _ graph.GraphDB = (*mockGraphDB)(nil)
+var _ analysisService = (*mockAnalysisService)(nil)
 
-func (m *mockGraphDB) Ping(_ context.Context) error { return nil }
-func (m *mockGraphDB) Close() error                 { return nil }
-func (m *mockGraphDB) BulkCreate(_ context.Context, _ string, _ []assembler.Node, _ []assembler.Relation) error {
-	return nil
-}
-func (m *mockGraphDB) Upsert(_ context.Context, _ string, _ []assembler.Node, _ []assembler.Relation) error {
-	return nil
-}
-func (m *mockGraphDB) DeleteRelations(_ context.Context, _ string, _ []assembler.Relation) error {
-	return nil
-}
-func (m *mockGraphDB) DeleteByURIs(_ context.Context, _ string, _ []string) error { return nil }
-func (m *mockGraphDB) Query(_ context.Context, _ string, _ string, _ map[string]any) ([]map[string]any, error) {
+func (m *mockAnalysisService) QueryTopology(_ context.Context, _ string, _ int) (*service.TopologyResult, error) {
 	return m.queryResult, m.queryErr
 }
-func (m *mockGraphDB) BuildCypher(_ string, _ string, _ []assembler.Node, _ []assembler.Relation, _ []string) (string, map[string]any) {
-	return "", nil
-}
-func (m *mockGraphDB) ClearDB(_ context.Context, _ string) error             { return nil }
-func (m *mockGraphDB) CloneDB(_ context.Context, _, _ string) error          { return nil }
-func (m *mockGraphDB) ListDBs(_ context.Context) ([]string, error)           { return nil, nil }
-func (m *mockGraphDB) HasDB(_ context.Context, _ string) (bool, error)       { return false, nil }
-func (m *mockGraphDB) EnsureIndexes(_ context.Context, _ []string) error     { return nil }
 
-// mockSnapshotManager 实现 snapshotManager 接口。
-type mockSnapshotManager struct {
+// mockSnapshotService 实现 snapshotService 接口。
+type mockSnapshotService struct {
 	listResult  []snapshot.SnapshotMeta
 	listErr     error
 	diffResult  *snapshot.SnapshotDiff
@@ -60,15 +38,15 @@ type mockSnapshotManager struct {
 	restoreName string // 记录 Restore 调用时的 name 参数
 }
 
-var _ snapshotManager = (*mockSnapshotManager)(nil)
+var _ snapshotService = (*mockSnapshotService)(nil)
 
-func (m *mockSnapshotManager) List(_ context.Context) ([]snapshot.SnapshotMeta, error) {
+func (m *mockSnapshotService) List(_ context.Context) ([]snapshot.SnapshotMeta, error) {
 	return m.listResult, m.listErr
 }
-func (m *mockSnapshotManager) Diff(_ context.Context, _, _ string) (*snapshot.SnapshotDiff, error) {
+func (m *mockSnapshotService) Diff(_ context.Context, _, _ string) (*snapshot.SnapshotDiff, error) {
 	return m.diffResult, m.diffErr
 }
-func (m *mockSnapshotManager) Restore(_ context.Context, name string) error {
+func (m *mockSnapshotService) Restore(_ context.Context, name string) error {
 	m.restoreName = name
 	return m.restoreErr
 }
@@ -135,10 +113,9 @@ func newTestServer(t *testing.T, h *toolHandlers) *mcpsdk.ClientSession {
 
 func TestListTools(t *testing.T) {
 	h := &toolHandlers{
-		graph:   &mockGraphDB{},
-		lock:    snapshot.NewGraphLock(),
-		manager: &mockSnapshotManager{},
-		syncSvc: &mockSyncService{},
+		analysisSvc: &mockAnalysisService{},
+		snapshotSvc: &mockSnapshotService{},
+		syncSvc:     &mockSyncService{},
 	}
 	cs := newTestServer(t, h)
 
@@ -177,16 +154,18 @@ func TestListTools(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestQueryTopology(t *testing.T) {
-	mockRows := []map[string]any{
-		{"n": map[string]any{"uri": "device:SN001", "hostname": "router-01"}},
-		{"n": map[string]any{"uri": "device:SN002", "hostname": "router-02"}},
-		{"n": map[string]any{"uri": "device:SN003", "hostname": "router-03"}},
+	mockResult := &service.TopologyResult{
+		Nodes: []map[string]any{
+			{"n": map[string]any{"uri": "device:SN001", "hostname": "router-01"}},
+			{"n": map[string]any{"uri": "device:SN002", "hostname": "router-02"}},
+			{"n": map[string]any{"uri": "device:SN003", "hostname": "router-03"}},
+		},
+		Count: 3,
 	}
 	h := &toolHandlers{
-		graph:   &mockGraphDB{queryResult: mockRows},
-		lock:    snapshot.NewGraphLock(),
-		manager: &mockSnapshotManager{},
-		syncSvc: &mockSyncService{},
+		analysisSvc: &mockAnalysisService{queryResult: mockResult},
+		snapshotSvc: &mockSnapshotService{},
+		syncSvc:     &mockSyncService{},
 	}
 	cs := newTestServer(t, h)
 
@@ -223,10 +202,9 @@ func TestQuerySnapshotList(t *testing.T) {
 		{Name: "snap-002", CreatedAt: time.Now(), NodeCount: 20, RelCount: 15},
 	}
 	h := &toolHandlers{
-		graph:   &mockGraphDB{},
-		lock:    snapshot.NewGraphLock(),
-		manager: &mockSnapshotManager{listResult: metas},
-		syncSvc: &mockSyncService{},
+		analysisSvc: &mockAnalysisService{},
+		snapshotSvc: &mockSnapshotService{listResult: metas},
+		syncSvc:     &mockSyncService{},
 	}
 	cs := newTestServer(t, h)
 
@@ -263,10 +241,9 @@ func TestSyncDataFull(t *testing.T) {
 		Duration:         500 * time.Millisecond,
 	}
 	h := &toolHandlers{
-		graph:   &mockGraphDB{},
-		lock:    snapshot.NewGraphLock(),
-		manager: &mockSnapshotManager{},
-		syncSvc: &mockSyncService{fullSyncResult: mockResult},
+		analysisSvc: &mockAnalysisService{},
+		snapshotSvc: &mockSnapshotService{},
+		syncSvc:     &mockSyncService{fullSyncResult: mockResult},
 	}
 	cs := newTestServer(t, h)
 
@@ -297,12 +274,11 @@ func TestSyncDataFull(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestRestoreSnapshot(t *testing.T) {
-	mockMgr := &mockSnapshotManager{}
+	mockSvc := &mockSnapshotService{}
 	h := &toolHandlers{
-		graph:   &mockGraphDB{},
-		lock:    snapshot.NewGraphLock(),
-		manager: mockMgr,
-		syncSvc: &mockSyncService{},
+		analysisSvc: &mockAnalysisService{},
+		snapshotSvc: mockSvc,
+		syncSvc:     &mockSyncService{},
 	}
 	cs := newTestServer(t, h)
 
@@ -323,8 +299,8 @@ func TestRestoreSnapshot(t *testing.T) {
 	if out.Message == "" {
 		t.Error("Message is empty")
 	}
-	if mockMgr.restoreName != "snap-001" {
-		t.Errorf("Restore called with name=%q, want snap-001", mockMgr.restoreName)
+	if mockSvc.restoreName != "snap-001" {
+		t.Errorf("Restore called with name=%q, want snap-001", mockSvc.restoreName)
 	}
 }
 
@@ -334,10 +310,9 @@ func TestRestoreSnapshot(t *testing.T) {
 
 func TestToolInvalidParams(t *testing.T) {
 	h := &toolHandlers{
-		graph:   &mockGraphDB{},
-		lock:    snapshot.NewGraphLock(),
-		manager: &mockSnapshotManager{},
-		syncSvc: &mockSyncService{},
+		analysisSvc: &mockAnalysisService{},
+		snapshotSvc: &mockSnapshotService{},
+		syncSvc:     &mockSyncService{},
 	}
 	cs := newTestServer(t, h)
 
@@ -360,10 +335,9 @@ func TestToolInvalidParams(t *testing.T) {
 
 func TestCallNonExistentTool(t *testing.T) {
 	h := &toolHandlers{
-		graph:   &mockGraphDB{},
-		lock:    snapshot.NewGraphLock(),
-		manager: &mockSnapshotManager{},
-		syncSvc: &mockSyncService{},
+		analysisSvc: &mockAnalysisService{},
+		snapshotSvc: &mockSnapshotService{},
+		syncSvc:     &mockSyncService{},
 	}
 	cs := newTestServer(t, h)
 

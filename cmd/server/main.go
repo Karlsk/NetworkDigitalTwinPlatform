@@ -68,14 +68,18 @@ func main() {
 		gdb, lock, cfg.Snapshot.Dir, cfg.Snapshot.MaxActive,
 	)
 
-	// 8. 构建 MCP Server 并注册工具
-	mcpServer := intmcp.NewNetworkTwinServer(gdb, lock, snapMgr, syncSvc)
+	// 8. 初始化 AnalysisService 和 SnapshotService
+	analysisSvc := service.NewAnalysisService(gdb, lock)
+	snapshotSvc := service.NewSnapshotService(snapMgr)
 
-	// 9. Graceful shutdown
+	// 9. 构建 MCP Server 并注册工具
+	mcpServer := intmcp.NewNetworkTwinServer(analysisSvc, snapshotSvc, syncSvc)
+
+	// 10. Graceful shutdown
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	// 10. 启动 Streamable HTTP MCP Server
+	// 11. 启动 Streamable HTTP MCP Server
 	addr := fmt.Sprintf(":%d", cfg.Server.Port)
 	if err := intmcp.RunHTTP(ctx, mcpServer, addr); err != nil {
 		slog.Error("MCP server error", "error", err)

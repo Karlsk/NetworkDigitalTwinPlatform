@@ -1,4 +1,4 @@
-.PHONY: build test test-integration test-e2e test-race lint docker-up docker-down pipeline-demo mcp-server mcp-client
+.PHONY: build test test-integration test-e2e test-race lint docker-up docker-down pipeline-demo mcp-server mcp-client verify-all test-coverage
 
 build:
 	go build ./...
@@ -32,3 +32,9 @@ mcp-server:
 
 mcp-client:
 	go run cmd/mcp-client/main.go
+
+test-coverage:
+	go test -cover ./...
+
+verify-all: build lint test test-race test-e2e
+	@echo "=== All checks passed ==="

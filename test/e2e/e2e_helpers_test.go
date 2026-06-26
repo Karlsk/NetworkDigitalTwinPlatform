@@ -16,10 +16,13 @@ import (
 
 	"gitlab.com/pml/network-digital-twin/internal/assembler"
 	"gitlab.com/pml/network-digital-twin/internal/config"
+	"gitlab.com/pml/network-digital-twin/internal/connector"
 	"gitlab.com/pml/network-digital-twin/internal/connector/mock"
 	"gitlab.com/pml/network-digital-twin/internal/graph"
 	"gitlab.com/pml/network-digital-twin/internal/normalizer"
 	"gitlab.com/pml/network-digital-twin/internal/schema"
+	"gitlab.com/pml/network-digital-twin/internal/service"
+	"gitlab.com/pml/network-digital-twin/internal/snapshot"
 )
 
 // newE2EClient 创建连接本地 Neo4j 的 GraphDB 客户端。
@@ -200,4 +203,67 @@ func envOrDefault(key, def string) string {
 		return v
 	}
 	return def
+}
+
+// newE2ESyncService 创建连接真实 Neo4j 的 SyncService。
+// 使用 testdata/mock_netbox/ 数据和完整 ontology，bufferSize=20。
+func newE2ESyncService(t *testing.T, client graph.GraphDB, lock *snapshot.GraphLock) *service.SyncService {
+	t.Helper()
+	reg := loadOntology(t)
+
+	dataDir := filepath.Join("..", "..", "testdata", "mock_netbox")
+	if _, err := os.Stat(dataDir); os.IsNotExist(err) {
+		t.Skipf("testdata/mock_netbox not found at %s", dataDir)
+	}
+
+	entityTypes := []string{"Device", "Interface", "ISIS", "Link", "Network_Slice"}
+	conn := mock.NewMockConnector("e2e-mock", dataDir, entityTypes)
+	registry := connector.NewConnectorRegistry()
+	registry.Register(conn)
+
+	norm := normalizer.NewNormalizer(reg)
+	asm := assembler.NewGraphAssembler(reg)
+	return service.NewSyncService(registry, norm, asm, client, lock, 20)
+}
+
+// newE2ESnapshotManager 创建 SnapshotManager，与 SyncService 共享 GraphLock。
+func newE2ESnapshotManager(t *testing.T, client graph.GraphDB, lock *snapshot.GraphLock) *snapshot.SnapshotManager {
+	t.Helper()
+	snapDir := t.TempDir()
+	return snapshot.NewSnapshotManager(client, lock, snapDir, 5)
+}
+
+// backupAndRestoreDefault 备份 default DB，返回恢复函数用于 defer。
+func backupAndRestoreDefault(t *testing.T, client graph.GraphDB) func() {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	backupDB := fmt.Sprintf("e2e_backup_%d", time.Now().UnixNano())
+
+	// 检查 default 是否有数据
+	rows, _ := client.Query(ctx, "default",
+		"MATCH (n) WHERE n._db = $_db RETURN count(n) AS cnt", nil)
+	hasData := false
+	if len(rows) > 0 {
+		if cnt, _ := rows[0]["cnt"].(int64); cnt > 0 {
+			hasData = true
+			if err := client.CloneDB(ctx, "default", backupDB); err != nil {
+				t.Logf("CloneDB backup error (non-fatal): %v", err)
+				hasData = false
+			}
+		}
+	}
+
+	return func() {
+		ctx2, cancel2 := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel2()
+		if hasData {
+			_ = client.ClearDB(ctx2, "default")
+			_ = client.CloneDB(ctx2, backupDB, "default")
+		} else {
+			_ = client.ClearDB(ctx2, "default")
+		}
+		_ = client.ClearDB(ctx2, backupDB)
+	}
 }

@@ -1,0 +1,247 @@
+kind: SnapshotMeta
+name: golden-baseline
+node_count: 21
+rel_count: 21
+---
+kind: Nodes
+items:
+    - label: Device
+      uri: device:SN12345
+      props:
+        chassis_mac: AA:BB:CC:01:02:03
+        device_type: Core
+        hostname: Router_Core_01
+        management_ip: 10.0.0.1
+        model: NE40E
+        serial_number: SN12345
+        status: Up
+        vendor: Huawei
+    - label: Device
+      uri: device:SN12346
+      props:
+        chassis_mac: AA:BB:CC:01:02:04
+        device_type: Edge
+        hostname: Router_Edge_01
+        management_ip: 10.0.0.2
+        model: NE20E
+        serial_number: SN12346
+        status: Up
+        vendor: Huawei
+    - label: Device
+      uri: device:SN12347
+      props:
+        chassis_mac: AA:BB:CC:01:02:05
+        device_type: Access
+        hostname: Switch_Access_01
+        management_ip: 10.0.0.3
+        model: S5700
+        serial_number: SN12347
+        status: Up
+        vendor: Huawei
+    - label: Interface
+      uri: iface:SN12345_GE1/0/1
+      props:
+        bandwidth: 10000
+        description: Uplink to Edge01
+        device_serial: SN12345
+        if_name: GE1/0/1
+        status: Up
+    - label: Interface
+      uri: iface:SN12345_GE1/0/2
+      props:
+        bandwidth: 10000
+        description: Uplink backup
+        device_serial: SN12345
+        if_name: GE1/0/2
+        status: Up
+    - label: Interface
+      uri: iface:SN12345_GE1/0/3
+      props:
+        bandwidth: 1000
+        description: Unused
+        device_serial: SN12345
+        if_name: GE1/0/3
+        status: Down
+    - label: Interface
+      uri: iface:SN12345_GE1/0/4
+      props:
+        bandwidth: 1000
+        description: Management
+        device_serial: SN12345
+        if_name: GE1/0/4
+        status: Up
+    - label: Interface
+      uri: iface:SN12346_GE1/0/1
+      props:
+        bandwidth: 10000
+        description: Uplink to Core01
+        device_serial: SN12346
+        if_name: GE1/0/1
+        status: Up
+    - label: Interface
+      uri: iface:SN12346_GE1/0/2
+      props:
+        bandwidth: 10000
+        description: Downlink to Access01
+        device_serial: SN12346
+        if_name: GE1/0/2
+        status: Up
+    - label: Interface
+      uri: iface:SN12346_GE1/0/3
+      props:
+        bandwidth: 1000
+        description: Customer A
+        device_serial: SN12346
+        if_name: GE1/0/3
+        status: Up
+    - label: Interface
+      uri: iface:SN12346_GE1/0/4
+      props:
+        bandwidth: 1000
+        description: Unused
+        device_serial: SN12346
+        if_name: GE1/0/4
+        status: Down
+    - label: Interface
+      uri: iface:SN12347_GE1/0/1
+      props:
+        bandwidth: 1000
+        description: Uplink to Edge01
+        device_serial: SN12347
+        if_name: GE1/0/1
+        status: Up
+    - label: Interface
+      uri: iface:SN12347_GE1/0/2
+      props:
+        bandwidth: 1000
+        description: Access port 1
+        device_serial: SN12347
+        if_name: GE1/0/2
+        status: Up
+    - label: Interface
+      uri: iface:SN12347_GE1/0/3
+      props:
+        bandwidth: 1000
+        description: Access port 2
+        device_serial: SN12347
+        if_name: GE1/0/3
+        status: Up
+    - label: Interface
+      uri: iface:SN12347_GE1/0/4
+      props:
+        bandwidth: 1000
+        description: Access port 3
+        device_serial: SN12347
+        if_name: GE1/0/4
+        status: Up
+    - label: ISIS
+      uri: isis:ISIS-001
+      props:
+        area_id: "49.0001"
+        isis_id: ISIS-001
+        level: L1L2
+        status: Active
+        system_id: 0000.0000.0001
+    - label: ISIS
+      uri: isis:ISIS-002
+      props:
+        area_id: "49.0001"
+        isis_id: ISIS-002
+        level: L1L2
+        status: Active
+        system_id: 0000.0000.0002
+    - label: ISIS
+      uri: isis:ISIS-003
+      props:
+        area_id: "49.0001"
+        isis_id: ISIS-003
+        level: L2
+        status: Inactive
+        system_id: 0000.0000.0003
+    - label: Link
+      uri: link:LINK-001
+      props:
+        bandwidth: 10000
+        link_id: LINK-001
+        name: Core-to-Edge-Primary
+        status: Up
+    - label: Link
+      uri: link:LINK-002
+      props:
+        bandwidth: 10000
+        link_id: LINK-002
+        name: Core-to-Edge-Backup
+        status: Up
+    - label: Network_Slice
+      uri: slice:SLICE-001
+      props:
+        name: Enterprise-Slice
+        sla_bandwidth: 10000
+        sla_latency: 50
+        slice_id: SLICE-001
+---
+kind: Relations
+items:
+    - type: HAS_INTERFACE
+      from: device:SN12345
+      to: iface:SN12345_GE1/0/1
+    - type: HAS_INTERFACE
+      from: device:SN12345
+      to: iface:SN12345_GE1/0/2
+    - type: HAS_INTERFACE
+      from: device:SN12345
+      to: iface:SN12345_GE1/0/3
+    - type: HAS_INTERFACE
+      from: device:SN12345
+      to: iface:SN12345_GE1/0/4
+    - type: HAS_INTERFACE
+      from: device:SN12346
+      to: iface:SN12346_GE1/0/1
+    - type: HAS_INTERFACE
+      from: device:SN12346
+      to: iface:SN12346_GE1/0/2
+    - type: HAS_INTERFACE
+      from: device:SN12346
+      to: iface:SN12346_GE1/0/3
+    - type: HAS_INTERFACE
+      from: device:SN12346
+      to: iface:SN12346_GE1/0/4
+    - type: CONNECTS_TO
+      from: device:SN12346
+      to: device:SN12345
+    - type: HAS_INTERFACE
+      from: device:SN12347
+      to: iface:SN12347_GE1/0/4
+    - type: HAS_INTERFACE
+      from: device:SN12347
+      to: iface:SN12347_GE1/0/1
+    - type: HAS_INTERFACE
+      from: device:SN12347
+      to: iface:SN12347_GE1/0/2
+    - type: CONNECTS_TO
+      from: device:SN12347
+      to: device:SN12346
+    - type: HAS_INTERFACE
+      from: device:SN12347
+      to: iface:SN12347_GE1/0/3
+    - type: RUNS_ON
+      from: isis:ISIS-001
+      to: iface:SN12345_GE1/0/1
+    - type: RUNS_ON
+      from: isis:ISIS-002
+      to: iface:SN12345_GE1/0/2
+    - type: RUNS_ON
+      from: isis:ISIS-003
+      to: iface:SN12346_GE1/0/2
+    - type: ENDPOINT
+      from: link:LINK-001
+      to: iface:SN12345_GE1/0/1
+    - type: ENDPOINT
+      from: link:LINK-001
+      to: iface:SN12346_GE1/0/1
+    - type: ENDPOINT
+      from: link:LINK-002
+      to: iface:SN12345_GE1/0/2
+    - type: ENDPOINT
+      from: link:LINK-002
+      to: iface:SN12346_GE1/0/2

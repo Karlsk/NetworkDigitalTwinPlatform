@@ -10,7 +10,6 @@ import (
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"gitlab.com/pml/network-digital-twin/internal/graph"
 	"gitlab.com/pml/network-digital-twin/internal/service"
 	"gitlab.com/pml/network-digital-twin/internal/snapshot"
 )
@@ -19,8 +18,13 @@ import (
 // 内部薄接口 — 解耦 MCP 层与具体实现，便于测试 mock
 // ---------------------------------------------------------------------------
 
-// snapshotManager 封装快照管理操作，由 *snapshot.SnapshotManager 隐式满足。
-type snapshotManager interface {
+// analysisService 封装分析服务操作，由 *service.AnalysisService 隐式满足。
+type analysisService interface {
+	QueryTopology(ctx context.Context, label string, limit int) (*service.TopologyResult, error)
+}
+
+// snapshotService 封装快照服务操作，由 *service.SnapshotService 隐式满足。
+type snapshotService interface {
 	List(ctx context.Context) ([]snapshot.SnapshotMeta, error)
 	Diff(ctx context.Context, a, b string) (*snapshot.SnapshotDiff, error)
 	Restore(ctx context.Context, name string) error
@@ -37,10 +41,9 @@ type syncService interface {
 
 // toolHandlers 封装 MCP 工具所需的全部依赖。
 type toolHandlers struct {
-	graph   graph.GraphDB
-	lock    *snapshot.GraphLock
-	manager snapshotManager
-	syncSvc syncService
+	analysisSvc analysisService
+	snapshotSvc snapshotService
+	syncSvc     syncService
 }
 
 // ---------------------------------------------------------------------------
@@ -63,30 +66,12 @@ type QueryTopologyOutput struct {
 func (h *toolHandlers) handleQueryTopology(
 	ctx context.Context, _ *mcpsdk.CallToolRequest, in QueryTopologyInput,
 ) (*mcpsdk.CallToolResult, QueryTopologyOutput, error) {
-	h.lock.RLock()
-	defer h.lock.RUnlock()
-
-	label := in.Label
-	if label == "" {
-		label = "Device"
-	}
-	limit := in.Limit
-	if limit <= 0 {
-		limit = 100
-	}
-
-	cypher := fmt.Sprintf(
-		"MATCH (n:%s) WHERE n._db = $_db RETURN n LIMIT %d", label, limit,
-	)
-	rows, err := h.graph.Query(ctx, "default", cypher, map[string]any{
-		"_db": "default",
-	})
+	result, err := h.analysisSvc.QueryTopology(ctx, in.Label, in.Limit)
 	if err != nil {
 		return nil, QueryTopologyOutput{}, fmt.Errorf("query topology: %w", err)
 	}
 
-	slog.Info("query_topology completed", "label", label, "count", len(rows))
-	return nil, QueryTopologyOutput{Nodes: rows, Count: len(rows)}, nil
+	return nil, QueryTopologyOutput{Nodes: result.Nodes, Count: result.Count}, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -128,7 +113,7 @@ func (h *toolHandlers) handleQuerySnapshot(
 ) (*mcpsdk.CallToolResult, QuerySnapshotOutput, error) {
 	switch in.Action {
 	case "list":
-		metas, err := h.manager.List(ctx)
+		metas, err := h.snapshotSvc.List(ctx)
 		if err != nil {
 			return nil, QuerySnapshotOutput{}, fmt.Errorf("list snapshots: %w", err)
 		}
@@ -148,7 +133,7 @@ func (h *toolHandlers) handleQuerySnapshot(
 		if in.SnapA == "" || in.SnapB == "" {
 			return nil, QuerySnapshotOutput{}, fmt.Errorf("diff requires snap_a and snap_b parameters")
 		}
-		diff, err := h.manager.Diff(ctx, in.SnapA, in.SnapB)
+		diff, err := h.snapshotSvc.Diff(ctx, in.SnapA, in.SnapB)
 		if err != nil {
 			return nil, QuerySnapshotOutput{}, fmt.Errorf("diff snapshots: %w", err)
 		}
@@ -235,7 +220,7 @@ func (h *toolHandlers) handleRestoreSnapshot(
 		return nil, RestoreSnapshotOutput{}, fmt.Errorf("missing required parameter: snapshot_name")
 	}
 
-	if err := h.manager.Restore(ctx, in.SnapshotName); err != nil {
+	if err := h.snapshotSvc.Restore(ctx, in.SnapshotName); err != nil {
 		return nil, RestoreSnapshotOutput{}, fmt.Errorf("restore snapshot %q: %w", in.SnapshotName, err)
 	}
 
