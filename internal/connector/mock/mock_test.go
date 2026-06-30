@@ -253,3 +253,24 @@ func TestStream_ReturnsNotImplemented(t *testing.T) {
 		t.Errorf("Stream() error = %v, want ErrNotImplemented", err)
 	}
 }
+
+// ============================================================
+// Ping tests
+// ============================================================
+
+func TestPing(t *testing.T) {
+	c := newTestConnector(t)
+	err := c.Ping(context.Background())
+	if err != nil {
+		t.Errorf("Ping() = %v, want nil", err)
+	}
+}
+
+func TestPing_NilContext(t *testing.T) {
+	c := NewMockConnector("mock", "/tmp", []string{"Device"})
+	// 即使 dataDir 不存在，Ping 也应返回 nil（仅检查连通性）
+	err := c.Ping(context.Background())
+	if err != nil {
+		t.Errorf("Ping() = %v, want nil", err)
+	}
+}

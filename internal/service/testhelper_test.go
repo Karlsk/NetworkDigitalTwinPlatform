@@ -128,3 +128,5 @@ func (m *mockConnector) Collect(_ context.Context, entityType string) ([]connect
 func (m *mockConnector) Stream(_ context.Context, _ string) (<-chan connector.Resource, error) {
 	return nil, connector.ErrNotImplemented
 }
+
+func (m *mockConnector) Ping(_ context.Context) error { return nil }

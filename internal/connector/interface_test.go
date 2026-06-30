@@ -26,13 +26,17 @@ func (m *mockConnector) Stream(_ context.Context, _ string) (<-chan Resource, er
 	return nil, ErrNotImplemented
 }
 
+func (m *mockConnector) Ping(_ context.Context) error {
+	return nil
+}
+
 // Compile-time check: mockConnector must satisfy Connector interface.
 var _ Connector = (*mockConnector)(nil)
 
 // --- Connector interface method count verification ---
 
 func TestConnectorInterfaceMethodCount(t *testing.T) {
-	// This test documents the expected 3 methods.
+	// This test documents the expected 4 methods.
 	// If a method is added or removed, the mockConnector above
 	// will fail to compile, and this test serves as documentation.
 	c := &mockConnector{
@@ -44,6 +48,8 @@ func TestConnectorInterfaceMethodCount(t *testing.T) {
 	_, _ = c.Collect(context.Background(), "Device")
 	// Method 3: Stream
 	_, _ = c.Stream(context.Background(), "Device")
+	// Method 4: Ping
+	_ = c.Ping(context.Background())
 }
 
 // --- Sentinel error tests ---

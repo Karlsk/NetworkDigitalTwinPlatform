@@ -34,6 +34,10 @@ type Connector interface {
 	// Stream 流式推送增量变更。
 	// MVP 阶段返回 (nil, ErrNotImplemented)，V1 接入 Kafka。
 	Stream(ctx context.Context, entityType string) (<-chan Resource, error)
+
+	// Ping 健康检查，验证数据源连通性。
+	// 返回 nil 表示数据源可达，返回 error 表示不可达或超时。
+	Ping(ctx context.Context) error
 }
 
 // ConnectorRegistry 连接器注册中心。

@@ -91,3 +91,8 @@ func (m *MockConnector) Collect(ctx context.Context, entityType string) ([]conne
 func (m *MockConnector) Stream(ctx context.Context, entityType string) (<-chan connector.Resource, error) {
 	return nil, connector.ErrNotImplemented
 }
+
+// Ping 健康检查。Mock 始终返回 nil（数据目录存在性已在构造时验证）。
+func (m *MockConnector) Ping(_ context.Context) error {
+	return nil
+}

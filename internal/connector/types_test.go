@@ -1,6 +1,9 @@
 package connector
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestResourceFields(t *testing.T) {
 	r := Resource{
@@ -39,6 +42,9 @@ func TestConnectorMetadataFields(t *testing.T) {
 		Name:        "mock-netbox",
 		Type:        "mock",
 		EntityTypes: []string{"Device", "Interface"},
+		BaseURL:     "http://netbox.local/api",
+		Timeout:     10 * time.Second,
+		AuthType:    "token",
 	}
 
 	if meta.Name != "mock-netbox" {
@@ -56,11 +62,52 @@ func TestConnectorMetadataFields(t *testing.T) {
 	if meta.EntityTypes[1] != "Interface" {
 		t.Errorf("EntityTypes[1] = %q, want %q", meta.EntityTypes[1], "Interface")
 	}
+	if meta.BaseURL != "http://netbox.local/api" {
+		t.Errorf("BaseURL = %q, want %q", meta.BaseURL, "http://netbox.local/api")
+	}
+	if meta.Timeout != 10*time.Second {
+		t.Errorf("Timeout = %v, want %v", meta.Timeout, 10*time.Second)
+	}
+	if meta.AuthType != "token" {
+		t.Errorf("AuthType = %q, want %q", meta.AuthType, "token")
+	}
 }
 
 func TestConnectorMetadataEmptyEntityTypes(t *testing.T) {
 	meta := ConnectorMetadata{Name: "empty", Type: "test"}
 	if meta.EntityTypes != nil {
 		t.Errorf("expected nil EntityTypes for zero-value, got %v", meta.EntityTypes)
+	}
+}
+
+func TestConnectorMetadataNewFields(t *testing.T) {
+	// 验证新字段默认值（零值）
+	meta := ConnectorMetadata{Name: "zero", Type: "mock"}
+	if meta.BaseURL != "" {
+		t.Errorf("BaseURL zero-value = %q, want empty", meta.BaseURL)
+	}
+	if meta.Timeout != 0 {
+		t.Errorf("Timeout zero-value = %v, want 0", meta.Timeout)
+	}
+	if meta.AuthType != "" {
+		t.Errorf("AuthType zero-value = %q, want empty", meta.AuthType)
+	}
+
+	// 验证新字段赋值
+	meta2 := ConnectorMetadata{
+		Name:     "rest-connector",
+		Type:     "netbox",
+		BaseURL:  "https://netbox.example.com/api",
+		Timeout:  30 * time.Second,
+		AuthType: "basic",
+	}
+	if meta2.BaseURL != "https://netbox.example.com/api" {
+		t.Errorf("BaseURL = %q, want %q", meta2.BaseURL, "https://netbox.example.com/api")
+	}
+	if meta2.Timeout != 30*time.Second {
+		t.Errorf("Timeout = %v, want %v", meta2.Timeout, 30*time.Second)
+	}
+	if meta2.AuthType != "basic" {
+		t.Errorf("AuthType = %q, want %q", meta2.AuthType, "basic")
 	}
 }
