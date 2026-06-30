@@ -125,31 +125,45 @@ func TestAuthConfigFields(t *testing.T) {
 	if auth.Type != "" {
 		t.Errorf("zero-value Type = %q, want empty", auth.Type)
 	}
+	if auth.Token != "" {
+		t.Errorf("zero-value Token = %q, want empty", auth.Token)
+	}
 	if auth.TokenEnv != "" {
 		t.Errorf("zero-value TokenEnv = %q, want empty", auth.TokenEnv)
 	}
 	if auth.Username != "" {
 		t.Errorf("zero-value Username = %q, want empty", auth.Username)
 	}
+	if auth.Password != "" {
+		t.Errorf("zero-value Password = %q, want empty", auth.Password)
+	}
 	if auth.PasswordEnv != "" {
 		t.Errorf("zero-value PasswordEnv = %q, want empty", auth.PasswordEnv)
 	}
 
-	// 赋值验证
+	// 赋值验证（双模式字段）
 	auth2 := AuthConfig{
 		Type:        "basic",
+		Token:       "direct-token-value",
 		TokenEnv:    "MY_TOKEN",
 		Username:    "admin",
+		Password:    "direct-password-value",
 		PasswordEnv: "MY_PASSWORD",
 	}
 	if auth2.Type != "basic" {
 		t.Errorf("Type = %q, want %q", auth2.Type, "basic")
+	}
+	if auth2.Token != "direct-token-value" {
+		t.Errorf("Token = %q, want %q", auth2.Token, "direct-token-value")
 	}
 	if auth2.TokenEnv != "MY_TOKEN" {
 		t.Errorf("TokenEnv = %q, want %q", auth2.TokenEnv, "MY_TOKEN")
 	}
 	if auth2.Username != "admin" {
 		t.Errorf("Username = %q, want %q", auth2.Username, "admin")
+	}
+	if auth2.Password != "direct-password-value" {
+		t.Errorf("Password = %q, want %q", auth2.Password, "direct-password-value")
 	}
 	if auth2.PasswordEnv != "MY_PASSWORD" {
 		t.Errorf("PasswordEnv = %q, want %q", auth2.PasswordEnv, "MY_PASSWORD")

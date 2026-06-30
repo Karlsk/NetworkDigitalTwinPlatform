@@ -17,11 +17,16 @@ type ConnectorConfigEntry struct {
 }
 
 // AuthConfig 认证配置。
+// 密钥支持双模式：直接值（token/password）优先，env 引用（token_env/password_env）兜底。
+// 生产环境推荐使用 env 引用，避免密钥写入配置文件；
+// 开发环境可直接在 YAML 中写 token/password 字段方便调试。
 type AuthConfig struct {
-	Type        string `yaml:"type"`         // "none" / "basic" / "token"
-	TokenEnv    string `yaml:"token_env"`    // 从环境变量读取 token
-	Username    string `yaml:"username"`     // basic auth 用户名
-	PasswordEnv string `yaml:"password_env"` // 从环境变量读取密码
+	Type        string `yaml:"type"`          // "none" / "basic" / "token"
+	Token       string `yaml:"token"`         // 直接值（dev 便捷，优先于 token_env）
+	TokenEnv    string `yaml:"token_env"`     // 环境变量名，生产环境推荐
+	Username    string `yaml:"username"`      // basic auth 用户名
+	Password    string `yaml:"password"`      // 直接值（dev 便捷，优先于 password_env）
+	PasswordEnv string `yaml:"password_env"`  // 环境变量名，生产环境推荐
 }
 
 // connectorConfigFile connectors.yaml 顶层包装结构。
