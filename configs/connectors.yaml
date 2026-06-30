@@ -9,3 +9,14 @@ connectors:
     config:
       data_dir: testdata/mock_cmdb
     entity_types: [ISIS, Link, Network_Slice]
+
+# Netbox connector (uncomment to enable)
+# - name: netbox-1
+#   type: netbox
+#   config:
+#     base_url: "http://netbox.example.com"
+#     timeout: "30s"
+#   entity_types: [Device, Interface]
+#   auth:
+#     type: token
+#     token_env: NETBOX_TOKEN
