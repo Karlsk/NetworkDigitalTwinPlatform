@@ -48,14 +48,21 @@ func main() {
 	norm := normalizer.NewNormalizer(reg)
 	asm := assembler.NewGraphAssembler(reg)
 
-	// 5. 初始化 ConnectorRegistry
+	// 5. 初始化 ConnectorRegistry + ConnectorFactory（配置驱动，替代硬编码）
 	connRegistry := connector.NewConnectorRegistry()
+	factory := connector.NewConnectorFactory()
 
-	// 5.1 注册 Mock Connector（开发/演示用，对齐 connectors.yaml）
-	netboxConn := mock.NewMockConnector("mock-netbox", "testdata/mock_netbox", []string{"Device", "Interface"})
-	connRegistry.Register(netboxConn)
-	cmdbConn := mock.NewMockConnector("mock-cmdb", "testdata/mock_cmdb", []string{"ISIS", "Link", "Network_Slice"})
-	connRegistry.Register(cmdbConn)
+	// 5.1 注册内置 builder（mock builder 因循环导入限制在此注册）
+	factory.RegisterBuilder("mock", func(name string, cfg map[string]any, entityTypes []string) (connector.Connector, error) {
+		dataDir, _ := cfg["data_dir"].(string)
+		return mock.NewMockConnector(name, dataDir, entityTypes), nil
+	})
+
+	// 5.2 从 connectors.yaml 配置批量创建并注册
+	if err := factory.CreateFromConfig("configs/connectors.yaml", connRegistry); err != nil {
+		slog.Error("init connectors", "error", err)
+		os.Exit(1)
+	}
 
 	// 6. 初始化 SyncService
 	syncSvc := service.NewSyncService(
