@@ -22,6 +22,11 @@ type mockGraphDB struct {
 	upsertErr          error
 	deleteByURIsErr    error
 	deleteRelationsErr error
+	queryErr           error
+
+	// 可配置返回数据
+	queryResults  []map[string]any
+	hasDBResult   map[string]bool // db name → 是否存在
 
 	// 记录调用参数
 	clearDBCalls         []string
@@ -68,7 +73,7 @@ func (m *mockGraphDB) DeleteByURIs(_ context.Context, _ string, uris []string) e
 }
 
 func (m *mockGraphDB) Query(_ context.Context, _ string, _ string, _ map[string]any) ([]map[string]any, error) {
-	return nil, nil
+	return m.queryResults, m.queryErr
 }
 
 func (m *mockGraphDB) BuildCypher(_ string, _ string, _ []assembler.Node, _ []assembler.Relation, _ []string) (string, map[string]any) {
@@ -84,7 +89,12 @@ func (m *mockGraphDB) CloneDB(_ context.Context, _, _ string) error { return nil
 
 func (m *mockGraphDB) ListDBs(_ context.Context) ([]string, error) { return nil, nil }
 
-func (m *mockGraphDB) HasDB(_ context.Context, _ string) (bool, error) { return false, nil }
+func (m *mockGraphDB) HasDB(_ context.Context, db string) (bool, error) {
+	if m.hasDBResult != nil {
+		return m.hasDBResult[db], nil
+	}
+	return false, nil
+}
 
 func (m *mockGraphDB) EnsureIndexes(_ context.Context, _ []string) error { return nil }
 

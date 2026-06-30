@@ -3,11 +3,13 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"gitlab.com/pml/network-digital-twin/internal/assembler"
 	"gitlab.com/pml/network-digital-twin/internal/service"
 	"gitlab.com/pml/network-digital-twin/internal/snapshot"
 )
@@ -348,5 +350,128 @@ func TestCallNonExistentTool(t *testing.T) {
 	})
 	if err == nil {
 		t.Error("expected error for calling nonexistent tool")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// TC-M08: query_snapshot diff action — snap_a + snap_b 参数
+// ---------------------------------------------------------------------------
+
+func TestQuerySnapshotDiff(t *testing.T) {
+	mockDiff := &snapshot.SnapshotDiff{
+		AddedNodes: []assembler.Node{{URI: "device:NEW", Labels: []string{"Device"}}},
+		RemovedNodes: []assembler.Node{
+			{URI: "device:OLD", Labels: []string{"Device"}},
+			{URI: "device:OLD2", Labels: []string{"Device"}},
+		},
+		AddedRels: []assembler.Relation{{Type: "CONNECTS_TO", From: "device:A", To: "device:B"}},
+	}
+	h := &toolHandlers{
+		analysisSvc: &mockAnalysisService{},
+		snapshotSvc: &mockSnapshotService{diffResult: mockDiff},
+		syncSvc:     &mockSyncService{},
+	}
+	cs := newTestServer(t, h)
+
+	ctx := context.Background()
+	res, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name:      "query_snapshot",
+		Arguments: map[string]any{"action": "diff", "snap_a": "snap-001", "snap_b": "snap-002"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool(query_snapshot) error = %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("CallTool(query_snapshot) IsError=true, content=%v", res.Content)
+	}
+
+	var out QuerySnapshotOutput
+	extractStructuredOutput(t, res.StructuredContent, &out)
+	if out.Diff == nil {
+		t.Fatal("Diff is nil")
+	}
+	if out.Diff.AddedNodes != 1 {
+		t.Errorf("Diff.AddedNodes = %d, want 1", out.Diff.AddedNodes)
+	}
+	if out.Diff.RemovedNodes != 2 {
+		t.Errorf("Diff.RemovedNodes = %d, want 2", out.Diff.RemovedNodes)
+	}
+	if out.Diff.AddedRels != 1 {
+		t.Errorf("Diff.AddedRels = %d, want 1", out.Diff.AddedRels)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// TC-M09: query_topology 错误路径 — mock 返回 error
+// ---------------------------------------------------------------------------
+
+func TestQueryTopologyError(t *testing.T) {
+	h := &toolHandlers{
+		analysisSvc: &mockAnalysisService{queryErr: errors.New("neo4j timeout")},
+		snapshotSvc: &mockSnapshotService{},
+		syncSvc:     &mockSyncService{},
+	}
+	cs := newTestServer(t, h)
+
+	ctx := context.Background()
+	res, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name:      "query_topology",
+		Arguments: map[string]any{"label": "Device"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool(query_topology) error = %v", err)
+	}
+	if !res.IsError {
+		t.Error("expected IsError=true for query topology error")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// TC-M10: sync_data 错误路径 — mock FullSync 返回 error
+// ---------------------------------------------------------------------------
+
+func TestSyncDataError(t *testing.T) {
+	h := &toolHandlers{
+		analysisSvc: &mockAnalysisService{},
+		snapshotSvc: &mockSnapshotService{},
+		syncSvc:     &mockSyncService{fullSyncErr: errors.New("sync failed")},
+	}
+	cs := newTestServer(t, h)
+
+	ctx := context.Background()
+	res, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name:      "sync_data",
+		Arguments: map[string]any{"action": "full"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool(sync_data) error = %v", err)
+	}
+	if !res.IsError {
+		t.Error("expected IsError=true for sync failure")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// TC-M11: query_snapshot list 错误路径 — mock List 返回 error
+// ---------------------------------------------------------------------------
+
+func TestQuerySnapshotListError(t *testing.T) {
+	h := &toolHandlers{
+		analysisSvc: &mockAnalysisService{},
+		snapshotSvc: &mockSnapshotService{listErr: errors.New("filesystem error")},
+		syncSvc:     &mockSyncService{},
+	}
+	cs := newTestServer(t, h)
+
+	ctx := context.Background()
+	res, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name:      "query_snapshot",
+		Arguments: map[string]any{"action": "list"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool(query_snapshot) error = %v", err)
+	}
+	if !res.IsError {
+		t.Error("expected IsError=true for list snapshot error")
 	}
 }

@@ -25,8 +25,8 @@ func TestE2E_Neo4jConnection(t *testing.T) {
 
 	// BulkCreate: 2 个 Device 节点 + 1 条 CONNECTS_TO 关系
 	nodes := []assembler.Node{
-		{Label: "Device", URI: "device:A", Props: map[string]any{"hostname": "router-a", "status": "Up"}},
-		{Label: "Device", URI: "device:B", Props: map[string]any{"hostname": "router-b", "status": "Up"}},
+		{Labels: []string{"Device"}, URI: "device:A", Props: map[string]any{"hostname": "router-a", "status": "Up"}},
+		{Labels: []string{"Device"}, URI: "device:B", Props: map[string]any{"hostname": "router-b", "status": "Up"}},
 	}
 	rels := []assembler.Relation{
 		{Type: "CONNECTS_TO", From: "device:A", To: "device:B"},
@@ -158,7 +158,7 @@ func TestE2E_IncrementalSync(t *testing.T) {
 
 	// === Upsert 新增节点 ===
 	newNodes := []assembler.Node{
-		{Label: "Device", URI: "device:SN99999", Props: map[string]any{
+		{Labels: []string{"Device"}, URI: "device:SN99999", Props: map[string]any{
 			"serial_number": "SN99999", "hostname": "New-Router", "status": "Up",
 		}},
 	}
@@ -171,7 +171,7 @@ func TestE2E_IncrementalSync(t *testing.T) {
 
 	// === Upsert 同一节点修改属性（幂等，不增加计数） ===
 	updatedNodes := []assembler.Node{
-		{Label: "Device", URI: "device:SN99999", Props: map[string]any{
+		{Labels: []string{"Device"}, URI: "device:SN99999", Props: map[string]any{
 			"hostname": "Updated-Router",
 		}},
 	}
@@ -296,7 +296,7 @@ func TestE2E_SnapshotLifecycle(t *testing.T) {
 
 	// === 修改 default: Upsert 新节点 ===
 	newNode := []assembler.Node{
-		{Label: "Device", URI: "device:SN-NEW", Props: map[string]any{"hostname": "brand-new"}},
+		{Labels: []string{"Device"}, URI: "device:SN-NEW", Props: map[string]any{"hostname": "brand-new"}},
 	}
 	if err := client.Upsert(ctx, "default", newNode, nil); err != nil {
 		t.Fatalf("Upsert error = %v", err)
@@ -355,9 +355,9 @@ func TestE2E_LogicalDBIsolation(t *testing.T) {
 
 	// dbA: 3 个节点
 	nodesA := []assembler.Node{
-		{Label: "Device", URI: "device:A1"},
-		{Label: "Device", URI: "device:A2"},
-		{Label: "Device", URI: "device:A3"},
+		{Labels: []string{"Device"}, URI: "device:A1"},
+		{Labels: []string{"Device"}, URI: "device:A2"},
+		{Labels: []string{"Device"}, URI: "device:A3"},
 	}
 	if err := client.BulkCreate(ctx, dbA, nodesA, nil); err != nil {
 		t.Fatalf("BulkCreate dbA error = %v", err)
@@ -365,11 +365,11 @@ func TestE2E_LogicalDBIsolation(t *testing.T) {
 
 	// dbB: 5 个节点
 	nodesB := []assembler.Node{
-		{Label: "Device", URI: "device:B1"},
-		{Label: "Device", URI: "device:B2"},
-		{Label: "Device", URI: "device:B3"},
-		{Label: "Device", URI: "device:B4"},
-		{Label: "Device", URI: "device:B5"},
+		{Labels: []string{"Device"}, URI: "device:B1"},
+		{Labels: []string{"Device"}, URI: "device:B2"},
+		{Labels: []string{"Device"}, URI: "device:B3"},
+		{Labels: []string{"Device"}, URI: "device:B4"},
+		{Labels: []string{"Device"}, URI: "device:B5"},
 	}
 	if err := client.BulkCreate(ctx, dbB, nodesB, nil); err != nil {
 		t.Fatalf("BulkCreate dbB error = %v", err)
