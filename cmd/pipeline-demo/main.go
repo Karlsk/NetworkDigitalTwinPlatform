@@ -228,10 +228,10 @@ func main() {
 	fmt.Printf("  关系总数:   %d\n", len(gm.Relations))
 	fmt.Printf("  孤儿边警告: %d\n", len(warnings))
 
-	// 按 Label 统计节点
+	// 按 MostSpecificLabel 统计节点
 	labelCount := make(map[string]int)
 	for _, n := range gm.Nodes {
-		labelCount[n.Label]++
+		labelCount[n.MostSpecificLabel()]++
 	}
 	fmt.Println("\n  节点分布:")
 	for label, cnt := range labelCount {
@@ -358,8 +358,8 @@ func main() {
 
 	// 向 testDB 写入 2 个节点
 	testNodes := []assembler.Node{
-		{Label: "Device", URI: "test:iso-001", Props: map[string]any{"hostname": "IsolatedDevice"}},
-		{Label: "Device", URI: "test:iso-002", Props: map[string]any{"hostname": "IsolatedDevice2"}},
+		{Labels: []string{"Device"}, URI: "test:iso-001", Props: map[string]any{"hostname": "IsolatedDevice"}},
+		{Labels: []string{"Device"}, URI: "test:iso-002", Props: map[string]any{"hostname": "IsolatedDevice2"}},
 	}
 	if err := client.BulkCreate(ctx, testDB, testNodes, nil); err != nil {
 		log.Fatalf("BulkCreate testDB 失败: %v", err)
@@ -408,7 +408,7 @@ func main() {
 
 	// Upsert: 修改 status 为 "Maintenance"，新增一个属性
 	upsertNodes := []assembler.Node{
-		{Label: "Device", URI: "device:SN12345", Props: map[string]any{
+		{Labels: []string{"Device"}, URI: "device:SN12345", Props: map[string]any{
 			"status":      "Maintenance",
 			"description": "updated by pipeline-demo",
 		}},
@@ -450,7 +450,7 @@ func main() {
 	section("Step 11: BuildCypher 预览 (不执行)")
 
 	previewNodes := []assembler.Node{
-		{Label: "Device", URI: "device:preview-001", Props: map[string]any{"hostname": "PreviewRouter"}},
+		{Labels: []string{"Device"}, URI: "device:preview-001", Props: map[string]any{"hostname": "PreviewRouter"}},
 	}
 	cypher, params := client.BuildCypher("create", "preview_db", previewNodes, nil, nil)
 	fmt.Println("  BuildCypher(\"create\") 输出:")
@@ -509,7 +509,7 @@ func main() {
 	fmt.Printf("  新增关系: %d\n", len(diff.AddedRels))
 	fmt.Printf("  删除关系: %d\n", len(diff.RemovedRels))
 	for _, n := range diff.RemovedNodes {
-		fmt.Printf("    删除: %s (%s)\n", n.URI, n.Label)
+		fmt.Printf("    删除: %s (%s)\n", n.URI, n.MostSpecificLabel())
 	}
 	checkpoint("Diff 检测到差异", len(diff.RemovedNodes) > 0)
 

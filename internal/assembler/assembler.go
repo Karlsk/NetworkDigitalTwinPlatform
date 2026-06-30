@@ -54,9 +54,9 @@ func (a *GraphAssembler) Assemble(resources []normalizer.NormalizedResource) (*G
 		}
 
 		node := Node{
-			Label: res.Kind,
-			URI:   res.URI,
-			Props: props,
+			Labels: []string{res.Kind},
+			URI:    res.URI,
+			Props:  props,
 		}
 		nodes = append(nodes, node)
 		uriIndex[res.URI] = true

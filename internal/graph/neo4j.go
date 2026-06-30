@@ -200,14 +200,23 @@ func (c *neo4jClient) HasDB(ctx context.Context, db string) (bool, error) {
 // 这是编译时类型安全的文档性注释。
 var _ func(string, auth.TokenManager, ...func(*neo4j.Config)) (neo4j.DriverWithContext, error) = driverFactory
 
-// groupNodesByLabel 按 Label 分组节点。
-// 用于 BulkCreate 将相同 Label 的节点合并到同一条 UNWIND Cypher 中。
-func groupNodesByLabel(nodes []assembler.Node) map[string][]assembler.Node {
+// groupNodesByLabels 按 MostSpecificLabel 分组节点。
+// 用于 BulkCreate/Upsert 将相同最具体 Label 的节点合并到同一条 UNWIND Cypher 中。
+func groupNodesByLabels(nodes []assembler.Node) map[string][]assembler.Node {
 	groups := make(map[string][]assembler.Node)
 	for _, n := range nodes {
-		groups[n.Label] = append(groups[n.Label], n)
+		groups[n.MostSpecificLabel()] = append(groups[n.MostSpecificLabel()], n)
 	}
 	return groups
+}
+
+// joinLabels 将标签列表拼接为 Cypher 多标签格式。
+// 例如 ["Resource", "Device"] -> ":Resource:Device"
+func joinLabels(labels []string) string {
+	if len(labels) == 0 {
+		return ""
+	}
+	return ":" + strings.Join(labels, ":")
 }
 
 // groupRelsByType 按关系类型分组。
@@ -228,8 +237,8 @@ func (c *neo4jClient) BulkCreate(ctx context.Context, db string, nodes []assembl
 	sess := sessionFactory(ctx, c.driver, neo4j.SessionConfig{AccessMode: neo4j.AccessModeWrite})
 	defer sess.Close(ctx)
 
-	// 按 Label 分组批量创建节点
-	for label, group := range groupNodesByLabel(nodes) {
+	// 按 MostSpecificLabel 分组批量创建节点
+	for label, group := range groupNodesByLabels(nodes) {
 		nodeData := make([]map[string]any, 0, len(group))
 		for _, n := range group {
 			// 复制 Props 避免修改调用方原始 map
@@ -246,9 +255,10 @@ func (c *neo4jClient) BulkCreate(ctx context.Context, db string, nodes []assembl
 			"_db":   db,
 			"nodes": nodeData,
 		}
+		labelStr := joinLabels(group[0].Labels)
 		cypher := fmt.Sprintf(
-			"UNWIND $nodes AS n CREATE (x:%s {_db: $_db, uri: n.uri}) SET x += n",
-			label,
+			"UNWIND $nodes AS n CREATE (x%s {_db: $_db, uri: n.uri}) SET x += n",
+			labelStr,
 		)
 		if _, err := sess.Run(ctx, cypher, params); err != nil {
 			return fmt.Errorf("bulk create nodes %s: %w", label, err)
@@ -278,7 +288,7 @@ func (c *neo4jClient) BulkCreate(ctx context.Context, db string, nodes []assembl
 		}
 	}
 
-	slog.Info("bulk create completed", "db", db, "node_labels", len(groupNodesByLabel(nodes)), "rel_types", len(groupRelsByType(rels)))
+	slog.Info("bulk create completed", "db", db, "node_labels", len(groupNodesByLabels(nodes)), "rel_types", len(groupRelsByType(rels)))
 	return nil
 }
 
@@ -290,8 +300,8 @@ func (c *neo4jClient) Upsert(ctx context.Context, db string, nodes []assembler.N
 	sess := sessionFactory(ctx, c.driver, neo4j.SessionConfig{AccessMode: neo4j.AccessModeWrite})
 	defer sess.Close(ctx)
 
-	// 按 Label 分组增量 Upsert 节点
-	for label, group := range groupNodesByLabel(nodes) {
+	// 按 MostSpecificLabel 分组增量 Upsert 节点
+	for label, group := range groupNodesByLabels(nodes) {
 		nodeData := make([]map[string]any, 0, len(group))
 		for _, n := range group {
 			// 复制 Props 避免修改调用方原始 map
@@ -311,10 +321,21 @@ func (c *neo4jClient) Upsert(ctx context.Context, db string, nodes []assembler.N
 			"_db":   db,
 			"nodes": nodeData,
 		}
-		cypher := fmt.Sprintf(
-			"UNWIND $nodes AS n MERGE (x:%s {_db: $_db, uri: n.uri}) SET x += n.props",
-			label,
-		)
+		// MERGE 只使用最具体 Label（Neo4j 不支持多 Label MERGE）
+		// 多标签时，ON CREATE SET 补充父 Label
+		var cypher string
+		if len(group[0].Labels) > 1 {
+			parentLabels := joinLabels(group[0].Labels[:len(group[0].Labels)-1])
+			cypher = fmt.Sprintf(
+				"UNWIND $nodes AS n MERGE (x:%s {_db: $_db, uri: n.uri}) ON CREATE SET x%s SET x += n.props",
+				label, parentLabels,
+			)
+		} else {
+			cypher = fmt.Sprintf(
+				"UNWIND $nodes AS n MERGE (x:%s {_db: $_db, uri: n.uri}) SET x += n.props",
+				label,
+			)
+		}
 		if _, err := sess.Run(ctx, cypher, params); err != nil {
 			return fmt.Errorf("upsert nodes %s: %w", label, err)
 		}
@@ -343,7 +364,7 @@ func (c *neo4jClient) Upsert(ctx context.Context, db string, nodes []assembler.N
 		}
 	}
 
-	slog.Info("upsert completed", "db", db, "node_labels", len(groupNodesByLabel(nodes)), "rel_types", len(groupRelsByType(rels)))
+	slog.Info("upsert completed", "db", db, "node_labels", len(groupNodesByLabels(nodes)), "rel_types", len(groupRelsByType(rels)))
 	return nil
 }
 
@@ -398,22 +419,33 @@ func (c *neo4jClient) DeleteRelations(ctx context.Context, db string, rels []ass
 	return nil
 }
 
-// groupCloneNodesByLabel 将 Query 返回的节点记录按 Label 分组。
-// 每条记录的 labels 字段是 []string，取第一个元素作为 Label。
-func groupCloneNodesByLabel(nodes []map[string]any) map[string][]map[string]any {
+// groupCloneNodesByLabels 将 Query 返回的节点记录按完整 labels 列表分组。
+// 多标签节点使用 ":Label1:Label2" 拼接形式作为分组键。
+func groupCloneNodesByLabels(nodes []map[string]any) map[string][]map[string]any {
 	groups := make(map[string][]map[string]any)
 	for _, n := range nodes {
+		// 尝试 []string
 		labels, ok := n["labels"].([]string)
 		if !ok || len(labels) == 0 {
-			// 尝试 []any 类型（Neo4j 驱动可能返回此类型）
+			// 尝试 []any（Neo4j 驱动可能返回此类型）
 			if anyLabels, ok := n["labels"].([]any); ok && len(anyLabels) > 0 {
-				if label, ok := anyLabels[0].(string); ok {
-					groups[label] = append(groups[label], n)
+				var strLabels []string
+				for _, l := range anyLabels {
+					if s, ok := l.(string); ok {
+						strLabels = append(strLabels, s)
+					}
+				}
+				if len(strLabels) > 0 {
+					key := strings.Join(strLabels, ":")
+					n["_labels"] = strLabels
+					groups[key] = append(groups[key], n)
 				}
 			}
 			continue
 		}
-		groups[labels[0]] = append(groups[labels[0]], n)
+		key := strings.Join(labels, ":")
+		n["_labels"] = labels
+		groups[key] = append(groups[key], n)
 	}
 	return groups
 }
@@ -459,9 +491,9 @@ func (c *neo4jClient) CloneDB(ctx context.Context, from, to string) error {
 	sess := sessionFactory(ctx, c.driver, neo4j.SessionConfig{AccessMode: neo4j.AccessModeWrite})
 	defer sess.Close(ctx)
 
-	// 按 Label 分组写入节点
-	nodeGroups := groupCloneNodesByLabel(nodeRecords)
-	for label, group := range nodeGroups {
+	// 按 labels 分组写入节点（支持多 Label）
+	nodeGroups := groupCloneNodesByLabels(nodeRecords)
+	for key, group := range nodeGroups {
 		nodeData := make([]map[string]any, 0, len(group))
 		for _, n := range group {
 			uri, _ := n["uri"].(string)
@@ -481,13 +513,16 @@ func (c *neo4jClient) CloneDB(ctx context.Context, from, to string) error {
 			})
 		}
 
+		// 使用 _labels 构建多 Label CREATE
+		labels, _ := group[0]["_labels"].([]string)
+		labelStr := joinLabels(labels)
 		params := map[string]any{"to": to, "nodes": nodeData}
 		cypher := fmt.Sprintf(
-			"UNWIND $nodes AS n CREATE (x:%s {_db: $to, uri: n.uri}) SET x += n.props",
-			label,
+			"UNWIND $nodes AS n CREATE (x%s {_db: $to, uri: n.uri}) SET x += n.props",
+			labelStr,
 		)
 		if _, err := sess.Run(ctx, cypher, params); err != nil {
-			return fmt.Errorf("clone db create nodes %s: %w", label, err)
+			return fmt.Errorf("clone db create nodes %s: %w", key, err)
 		}
 	}
 
@@ -529,7 +564,7 @@ func (c *neo4jClient) BuildCypher(action string, db string, nodes []assembler.No
 
 	switch action {
 	case "create":
-		nodeGroups := groupNodesByLabel(nodes)
+		nodeGroups := groupNodesByLabels(nodes)
 		var cyphers []string
 		for label, group := range nodeGroups {
 			nodeData := make([]map[string]any, 0, len(group))
@@ -537,15 +572,16 @@ func (c *neo4jClient) BuildCypher(action string, db string, nodes []assembler.No
 				nodeData = append(nodeData, map[string]any{"uri": n.URI, "props": n.Props})
 			}
 			params["nodes_"+label] = nodeData
+			labelStr := joinLabels(group[0].Labels)
 			cyphers = append(cyphers, fmt.Sprintf(
-				"UNWIND $nodes_%s AS n CREATE (x:%s {_db: $_db, uri: n.uri}) SET x += n.props",
-				label, label,
+				"UNWIND $nodes_%s AS n CREATE (x%s {_db: $_db, uri: n.uri}) SET x += n.props",
+				label, labelStr,
 			))
 		}
 		return strings.Join(cyphers, ";\n"), params
 
 	case "upsert":
-		nodeGroups := groupNodesByLabel(nodes)
+		nodeGroups := groupNodesByLabels(nodes)
 		var cyphers []string
 		for label, group := range nodeGroups {
 			nodeData := make([]map[string]any, 0, len(group))
@@ -553,10 +589,18 @@ func (c *neo4jClient) BuildCypher(action string, db string, nodes []assembler.No
 				nodeData = append(nodeData, map[string]any{"uri": n.URI, "props": n.Props})
 			}
 			params["nodes_"+label] = nodeData
-			cyphers = append(cyphers, fmt.Sprintf(
-				"UNWIND $nodes_%s AS n MERGE (x:%s {_db: $_db, uri: n.uri}) SET x += n.props",
-				label, label,
-			))
+			if len(group[0].Labels) > 1 {
+				parentLabels := joinLabels(group[0].Labels[:len(group[0].Labels)-1])
+				cyphers = append(cyphers, fmt.Sprintf(
+					"UNWIND $nodes_%s AS n MERGE (x:%s {_db: $_db, uri: n.uri}) ON CREATE SET x%s SET x += n.props",
+					label, label, parentLabels,
+				))
+			} else {
+				cyphers = append(cyphers, fmt.Sprintf(
+					"UNWIND $nodes_%s AS n MERGE (x:%s {_db: $_db, uri: n.uri}) SET x += n.props",
+					label, label,
+				))
+			}
 		}
 		return strings.Join(cyphers, ";\n"), params
 

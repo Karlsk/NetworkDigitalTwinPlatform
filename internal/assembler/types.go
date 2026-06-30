@@ -6,12 +6,27 @@ package assembler
 
 // Node 图节点（GraphModel IR）。
 // 由 GraphAssembler 产出，被 GraphDB 消费。
-// Label 对应 EntityType 名称（如 "Device"、"Interface"），
+// Labels 对应 EntityType 继承链（如 ["Resource", "Device"]），从基类到具体类，
 // URI 由 uriTemplate + stableKeys 生成，是节点在逻辑 DB 内的唯一标识。
 type Node struct {
-	Label string         // 节点标签，如 "Device"
-	URI   string         // 唯一资源标识符
-	Props map[string]any // 节点属性
+	Labels []string     // 节点标签列表，如 ["Resource", "Device"]
+	URI    string       // 唯一资源标识符
+	Props  map[string]any // 节点属性
+}
+
+// NewNode 创建单标签节点的便捷构造函数，保持向后兼容。
+// V1-15 本体继承体系引入后，Labels 可能包含多个元素。
+func NewNode(label string, uri string, props map[string]any) Node {
+	return Node{Labels: []string{label}, URI: uri, Props: props}
+}
+
+// MostSpecificLabel 返回最具体的标签（最后一个）。
+// 用于 Cypher MERGE/CREATE 按最具体 Label 分组，以及查询/展示场景。
+func (n Node) MostSpecificLabel() string {
+	if len(n.Labels) == 0 {
+		return ""
+	}
+	return n.Labels[len(n.Labels)-1]
 }
 
 // Relation 图边（GraphModel IR）。

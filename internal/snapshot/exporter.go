@@ -20,9 +20,9 @@ type yamlMetaDoc struct {
 }
 
 type yamlNodeItem struct {
-	Label string         `yaml:"label"`
-	URI   string         `yaml:"uri"`
-	Props map[string]any `yaml:"props,omitempty"`
+	Labels []string     `yaml:"labels"`
+	URI    string       `yaml:"uri"`
+	Props  map[string]any `yaml:"props,omitempty"`
 }
 
 type yamlNodesDoc struct {
@@ -70,9 +70,9 @@ func exportToYAML(filePath string, meta SnapshotMeta, nodes []assembler.Node, re
 	nodeItems := make([]yamlNodeItem, 0, len(nodes))
 	for _, n := range nodes {
 		nodeItems = append(nodeItems, yamlNodeItem{
-			Label: n.Label,
-			URI:   n.URI,
-			Props: n.Props,
+			Labels: n.Labels,
+			URI:    n.URI,
+			Props:  n.Props,
 		})
 	}
 	nodesDoc := yamlNodesDoc{Kind: "Nodes", Items: nodeItems}

@@ -4,51 +4,57 @@ import "testing"
 
 func TestNodeFields(t *testing.T) {
 	tests := []struct {
-		name  string
-		node  Node
-		label string
-		uri   string
-		props int
+		name   string
+		node   Node
+		labels []string
+		uri    string
+		props  int
 	}{
 		{
 			name: "Device node with properties",
 			node: Node{
-				Label: "Device",
-				URI:   "device:SN001",
+				Labels: []string{"Device"},
+				URI:    "device:SN001",
 				Props: map[string]any{
 					"hostname": "router-01",
 					"vendor":   "Huawei",
 					"status":   "Up",
 				},
 			},
-			label: "Device",
-			uri:   "device:SN001",
-			props: 3,
+			labels: []string{"Device"},
+			uri:    "device:SN001",
+			props:  3,
 		},
 		{
-			name:  "empty node",
-			node:  Node{},
-			label: "",
-			uri:   "",
-			props: 0,
+			name:   "empty node",
+			node:   Node{},
+			labels: nil,
+			uri:    "",
+			props:  0,
 		},
 		{
 			name: "node with nil props",
 			node: Node{
-				Label: "Interface",
-				URI:   "iface:SN001_eth0",
-				Props: nil,
+				Labels: []string{"Interface"},
+				URI:    "iface:SN001_eth0",
+				Props:  nil,
 			},
-			label: "Interface",
-			uri:   "iface:SN001_eth0",
-			props: 0,
+			labels: []string{"Interface"},
+			uri:    "iface:SN001_eth0",
+			props:  0,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if tt.node.Label != tt.label {
-				t.Errorf("Label = %q, want %q", tt.node.Label, tt.label)
+			if len(tt.node.Labels) != len(tt.labels) {
+				t.Errorf("Labels = %v, want %v", tt.node.Labels, tt.labels)
+			} else {
+				for i := range tt.labels {
+					if tt.node.Labels[i] != tt.labels[i] {
+						t.Errorf("Labels[%d] = %q, want %q", i, tt.node.Labels[i], tt.labels[i])
+					}
+				}
 			}
 			if tt.node.URI != tt.uri {
 				t.Errorf("URI = %q, want %q", tt.node.URI, tt.uri)
@@ -120,8 +126,8 @@ func TestRelationFields(t *testing.T) {
 func TestGraphModelFields(t *testing.T) {
 	gm := GraphModel{
 		Nodes: []Node{
-			{Label: "Device", URI: "device:SN001", Props: map[string]any{"hostname": "router-01"}},
-			{Label: "Interface", URI: "iface:SN001_eth0"},
+			{Labels: []string{"Device"}, URI: "device:SN001", Props: map[string]any{"hostname": "router-01"}},
+			{Labels: []string{"Interface"}, URI: "iface:SN001_eth0"},
 		},
 		Relations: []Relation{
 			{Type: "HAS_INTERFACE", From: "device:SN001", To: "iface:SN001_eth0"},
@@ -134,8 +140,8 @@ func TestGraphModelFields(t *testing.T) {
 	if len(gm.Relations) != 1 {
 		t.Errorf("Relations count = %d, want 1", len(gm.Relations))
 	}
-	if gm.Nodes[0].Label != "Device" {
-		t.Errorf("Nodes[0].Label = %q, want %q", gm.Nodes[0].Label, "Device")
+	if gm.Nodes[0].MostSpecificLabel() != "Device" {
+		t.Errorf("Nodes[0].MostSpecificLabel() = %q, want %q", gm.Nodes[0].MostSpecificLabel(), "Device")
 	}
 	if gm.Relations[0].Type != "HAS_INTERFACE" {
 		t.Errorf("Relations[0].Type = %q, want %q", gm.Relations[0].Type, "HAS_INTERFACE")
@@ -169,8 +175,8 @@ func TestValidationWarningFields(t *testing.T) {
 // so assigning the same map to two Nodes shares the underlying data.
 func TestNodePropsMapIsReference(t *testing.T) {
 	shared := map[string]any{"status": "Up"}
-	n1 := Node{Label: "Device", URI: "device:A", Props: shared}
-	n2 := Node{Label: "Device", URI: "device:B", Props: shared}
+	n1 := Node{Labels: []string{"Device"}, URI: "device:A", Props: shared}
+	n2 := Node{Labels: []string{"Device"}, URI: "device:B", Props: shared}
 
 	// Modify through n1
 	n1.Props["status"] = "Down"
@@ -178,5 +184,57 @@ func TestNodePropsMapIsReference(t *testing.T) {
 	// n2 should see the change (shared map)
 	if n2.Props["status"] != "Down" {
 		t.Error("expected Props map to be shared reference, but n2 was unaffected")
+	}
+}
+
+func TestNewNode(t *testing.T) {
+	n := NewNode("Device", "device:SN001", map[string]any{"hostname": "router-01"})
+
+	if len(n.Labels) != 1 || n.Labels[0] != "Device" {
+		t.Errorf("Labels = %v, want [\"Device\"]", n.Labels)
+	}
+	if n.URI != "device:SN001" {
+		t.Errorf("URI = %q, want %q", n.URI, "device:SN001")
+	}
+	if n.Props["hostname"] != "router-01" {
+		t.Errorf("Props[hostname] = %v, want %q", n.Props["hostname"], "router-01")
+	}
+}
+
+func TestMostSpecificLabel(t *testing.T) {
+	tests := []struct {
+		name   string
+		node   Node
+		expect string
+	}{
+		{
+			name:   "empty labels",
+			node:   Node{},
+			expect: "",
+		},
+		{
+			name:   "single label",
+			node:   Node{Labels: []string{"Device"}},
+			expect: "Device",
+		},
+		{
+			name:   "multi labels with inheritance",
+			node:   Node{Labels: []string{"Resource", "Device"}},
+			expect: "Device",
+		},
+		{
+			name:   "three level inheritance",
+			node:   Node{Labels: []string{"Base", "Resource", "Device"}},
+			expect: "Device",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.node.MostSpecificLabel()
+			if got != tt.expect {
+				t.Errorf("MostSpecificLabel() = %q, want %q", got, tt.expect)
+			}
+		})
 	}
 }

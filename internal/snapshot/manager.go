@@ -69,22 +69,22 @@ func (sm *SnapshotManager) Create(ctx context.Context, name string) (SnapshotMet
 	for skip := 0; ; skip += pageSize {
 		rows, err := sm.graph.Query(ctx, "default",
 			`MATCH (n) WHERE n._db = $_db `+
-				`RETURN labels(n)[0] AS label, n.uri AS uri, properties(n) AS props `+
+				`RETURN labels(n) AS labels, n.uri AS uri, properties(n) AS props `+
 				`ORDER BY n.uri SKIP $skip LIMIT $limit`,
 			map[string]any{"skip": skip, "limit": pageSize})
 		if err != nil {
 			return SnapshotMeta{}, fmt.Errorf("query nodes: %w", err)
 		}
 		for _, row := range rows {
-			label, _ := row["label"].(string)
+			labels := anyToStringSlice(row["labels"])
 			uri, _ := row["uri"].(string)
-			if label == "" || uri == "" {
+			if len(labels) == 0 || uri == "" {
 				continue // 跳过不符合节点格式的行
 			}
 			nodes = append(nodes, assembler.Node{
-				Label: label,
-				URI:   uri,
-				Props: extractProps(row["props"]),
+				Labels: labels,
+				URI:    uri,
+				Props:  extractProps(row["props"]),
 			})
 		}
 		if len(rows) < pageSize {
@@ -175,6 +175,27 @@ func (sm *SnapshotManager) Delete(ctx context.Context, name string) error {
 	return nil
 }
 
+// anyToStringSlice 将 any 转换为 []string。
+// Neo4j 驱动返回 labels(n) 为 []any，需转换为 []string。
+func anyToStringSlice(v any) []string {
+	if v == nil {
+		return nil
+	}
+	switch s := v.(type) {
+	case []string:
+		return s
+	case []any:
+		result := make([]string, 0, len(s))
+		for _, item := range s {
+			if str, ok := item.(string); ok {
+				result = append(result, str)
+			}
+		}
+		return result
+	}
+	return nil
+}
+
 // extractProps 从 Query 返回的 properties 字段提取 map[string]any。
 func extractProps(v any) map[string]any {
 	if v == nil {
@@ -253,17 +274,17 @@ func (sm *SnapshotManager) Diff(ctx context.Context, a, b string) (*SnapshotDiff
 	// b 中有而 a 中没有的节点（新增）
 	addedNodeRows, err := sm.graph.Query(ctx, b,
 		`MATCH (n) WHERE NOT EXISTS { MATCH (m {_db: $other, uri: n.uri}) } `+
-			`RETURN labels(n)[0] AS label, n.uri AS uri, properties(n) AS props`,
+			`RETURN labels(n) AS labels, n.uri AS uri, properties(n) AS props`,
 		map[string]any{"other": a})
 	if err != nil {
 		return nil, fmt.Errorf("diff added nodes: %w", err)
 	}
 	for _, row := range addedNodeRows {
-		label, _ := row["label"].(string)
+		labels := anyToStringSlice(row["labels"])
 		uri, _ := row["uri"].(string)
-		if label != "" && uri != "" {
+		if len(labels) > 0 && uri != "" {
 			diff.AddedNodes = append(diff.AddedNodes, assembler.Node{
-				Label: label, URI: uri, Props: extractProps(row["props"]),
+				Labels: labels, URI: uri, Props: extractProps(row["props"]),
 			})
 		}
 	}
@@ -271,17 +292,17 @@ func (sm *SnapshotManager) Diff(ctx context.Context, a, b string) (*SnapshotDiff
 	// a 中有而 b 中没有的节点（删除）
 	removedNodeRows, err := sm.graph.Query(ctx, a,
 		`MATCH (n) WHERE NOT EXISTS { MATCH (m {_db: $other, uri: n.uri}) } `+
-			`RETURN labels(n)[0] AS label, n.uri AS uri, properties(n) AS props`,
+			`RETURN labels(n) AS labels, n.uri AS uri, properties(n) AS props`,
 		map[string]any{"other": b})
 	if err != nil {
 		return nil, fmt.Errorf("diff removed nodes: %w", err)
 	}
 	for _, row := range removedNodeRows {
-		label, _ := row["label"].(string)
+		labels := anyToStringSlice(row["labels"])
 		uri, _ := row["uri"].(string)
-		if label != "" && uri != "" {
+		if len(labels) > 0 && uri != "" {
 			diff.RemovedNodes = append(diff.RemovedNodes, assembler.Node{
-				Label: label, URI: uri, Props: extractProps(row["props"]),
+				Labels: labels, URI: uri, Props: extractProps(row["props"]),
 			})
 		}
 	}

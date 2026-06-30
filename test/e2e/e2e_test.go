@@ -565,7 +565,7 @@ func TestE2E_FullDataFlow(t *testing.T) {
 	if len(diff.AddedNodes) != 1 {
 		t.Errorf("LocalDiff.AddedNodes = %d, want 1", len(diff.AddedNodes))
 		for i, n := range diff.AddedNodes {
-			t.Logf("  AddedNode[%d]: label=%s uri=%s", i, n.Label, n.URI)
+			t.Logf("  AddedNode[%d]: labels=%v uri=%s", i, n.Labels, n.URI)
 		}
 	} else if diff.AddedNodes[0].URI != "device:SN-E2E-NEW" {
 		t.Errorf("LocalDiff.AddedNodes[0].URI = %q, want %q", diff.AddedNodes[0].URI, "device:SN-E2E-NEW")

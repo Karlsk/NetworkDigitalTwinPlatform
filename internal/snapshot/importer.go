@@ -9,6 +9,33 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// yamlNodeItemImport 同时支持新旧 YAML 格式:
+// 新格式: labels: ["Resource", "Device"]
+// 旧格式: label: Device（向后兼容）
+type yamlNodeItemImport struct {
+	Label  string   `yaml:"label"`  // 旧格式，兼容读取
+	Labels []string `yaml:"labels"` // 新格式
+	URI    string   `yaml:"uri"`
+	Props  map[string]any `yaml:"props,omitempty"`
+}
+
+// getLabels 优先返回 Labels，如果为空则 fallback 到旧的 Label 字段。
+func (item yamlNodeItemImport) getLabels() []string {
+	if len(item.Labels) > 0 {
+		return item.Labels
+	}
+	if item.Label != "" {
+		return []string{item.Label}
+	}
+	return nil
+}
+
+// yamlNodesDocImport 节点文档（导入用，同时支持新旧格式）。
+type yamlNodesDocImport struct {
+	Kind  string                 `yaml:"kind"`
+	Items []yamlNodeItemImport   `yaml:"items"`
+}
+
 // importFromYAML 从 YAML 多文档文件读取快照数据。
 // 返回节点、关系和元数据。
 func importFromYAML(filePath string) (nodes []assembler.Node, rels []assembler.Relation, meta SnapshotMeta, err error) {
@@ -34,16 +61,16 @@ func importFromYAML(filePath string) (nodes []assembler.Node, rels []assembler.R
 	}
 
 	// 文档 2: 节点
-	var nodesDoc yamlNodesDoc
+	var nodesDoc yamlNodesDocImport
 	if err := dec.Decode(&nodesDoc); err != nil {
 		return nil, nil, SnapshotMeta{}, fmt.Errorf("decode nodes doc: %w", err)
 	}
 	nodes = make([]assembler.Node, 0, len(nodesDoc.Items))
 	for _, item := range nodesDoc.Items {
 		nodes = append(nodes, assembler.Node{
-			Label: item.Label,
-			URI:   item.URI,
-			Props: item.Props,
+			Labels: item.getLabels(),
+			URI:    item.URI,
+			Props:  item.Props,
 		})
 	}
 

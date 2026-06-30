@@ -87,7 +87,7 @@ func TestGraphDBDBParameterPresence(t *testing.T) {
 
 	// All these calls include "test-db" as the db parameter
 	nodes := []assembler.Node{
-		{Label: "Device", URI: "device:SN001", Props: map[string]any{"hostname": "r1"}},
+		{Labels: []string{"Device"}, URI: "device:SN001", Props: map[string]any{"hostname": "r1"}},
 	}
 	rels := []assembler.Relation{
 		{Type: "HAS_INTERFACE", From: "device:SN001", To: "iface:SN001_eth0"},
@@ -111,7 +111,7 @@ func TestGraphDBDBParameterPresence(t *testing.T) {
 
 func TestBuildCypherActionValues(t *testing.T) {
 	db := &stubGraphDB{}
-	nodes := []assembler.Node{{Label: "Device", URI: "device:A"}}
+	nodes := []assembler.Node{{Labels: []string{"Device"}, URI: "device:A"}}
 	rels := []assembler.Relation{{Type: "HAS_INTERFACE", From: "device:A", To: "iface:A_eth0"}}
 	uris := []string{"device:A"}
 
@@ -132,8 +132,8 @@ func TestGraphDBUsesAssemblerTypes(t *testing.T) {
 	// as the GraphModel IR, not schema types. This is a key architecture
 	// invariant (Principle I: Layered IR Pipeline).
 	nodes := []assembler.Node{
-		{Label: "Device", URI: "device:SN001", Props: map[string]any{"hostname": "r1"}},
-		{Label: "Interface", URI: "iface:SN001_eth0", Props: map[string]any{"status": "Up"}},
+		{Labels: []string{"Device"}, URI: "device:SN001", Props: map[string]any{"hostname": "r1"}},
+		{Labels: []string{"Interface"}, URI: "iface:SN001_eth0", Props: map[string]any{"status": "Up"}},
 	}
 	rels := []assembler.Relation{
 		{Type: "HAS_INTERFACE", From: "device:SN001", To: "iface:SN001_eth0"},

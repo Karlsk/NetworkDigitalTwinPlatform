@@ -43,10 +43,10 @@ func TestSnapshotMetaFields(t *testing.T) {
 func TestSnapshotDiffFields(t *testing.T) {
 	diff := SnapshotDiff{
 		AddedNodes: []assembler.Node{
-			{Label: "Device", URI: "device:NEW001", Props: map[string]any{"hostname": "new-router"}},
+			{Labels: []string{"Device"}, URI: "device:NEW001", Props: map[string]any{"hostname": "new-router"}},
 		},
 		RemovedNodes: []assembler.Node{
-			{Label: "Device", URI: "device:OLD001"},
+			{Labels: []string{"Device"}, URI: "device:OLD001"},
 		},
 		AddedRels: []assembler.Relation{
 			{Type: "HAS_INTERFACE", From: "device:NEW001", To: "iface:NEW001_eth0"},
@@ -119,7 +119,7 @@ func TestSnapshotManager_Create(t *testing.T) {
 	// mock Query 返回节点和关系数据
 	gdb := &mockGraphDB{
 		queryResults: []map[string]any{
-			{"label": "Device", "uri": "device:SN001", "props": map[string]any{"hostname": "router-01"}},
+			{"labels": []any{"Device"}, "uri": "device:SN001", "props": map[string]any{"hostname": "router-01"}},
 		},
 	}
 	lock := NewGraphLock()
@@ -177,7 +177,7 @@ func TestSnapshotManager_Create_QueryError(t *testing.T) {
 func TestSnapshotManager_List(t *testing.T) {
 	gdb := &mockGraphDB{
 		queryResults: []map[string]any{
-			{"label": "Device", "uri": "device:SN001", "props": map[string]any{"hostname": "r1"}},
+			{"labels": []any{"Device"}, "uri": "device:SN001", "props": map[string]any{"hostname": "r1"}},
 		},
 	}
 	lock := NewGraphLock()
@@ -246,7 +246,7 @@ func TestSnapshotManager_Delete_ClearsNeo4j(t *testing.T) {
 func TestSnapshotManager_Delete_PreservesYAML(t *testing.T) {
 	gdb := &mockGraphDB{
 		queryResults: []map[string]any{
-			{"label": "Device", "uri": "device:SN001", "props": map[string]any{"hostname": "r1"}},
+			{"labels": []any{"Device"}, "uri": "device:SN001", "props": map[string]any{"hostname": "r1"}},
 		},
 		hasDBResult: map[string]bool{"snap-keep": true},
 	}
@@ -337,7 +337,7 @@ func writeTestSnapshot(t *testing.T, dir, name string, nodes []yamlNodeItem, rel
 func TestSnapshotManager_EnsureLoaded_FromYAML(t *testing.T) {
 	snapDir := t.TempDir()
 	writeTestSnapshot(t, snapDir, "snap-a",
-		[]yamlNodeItem{{Label: "Device", URI: "device:001"}},
+		[]yamlNodeItem{{Labels: []string{"Device"}, URI: "device:001"}},
 		nil,
 	)
 
@@ -399,7 +399,7 @@ func TestSnapshotManager_EnsureLoaded_FileNotFound(t *testing.T) {
 func TestSnapshotManager_Restore(t *testing.T) {
 	snapDir := t.TempDir()
 	writeTestSnapshot(t, snapDir, "snap-a",
-		[]yamlNodeItem{{Label: "Device", URI: "device:001"}},
+		[]yamlNodeItem{{Labels: []string{"Device"}, URI: "device:001"}},
 		nil,
 	)
 
@@ -431,7 +431,7 @@ func TestSnapshotManager_Restore(t *testing.T) {
 func TestSnapshotManager_Restore_LockAcquired(t *testing.T) {
 	snapDir := t.TempDir()
 	writeTestSnapshot(t, snapDir, "snap-a",
-		[]yamlNodeItem{{Label: "Device", URI: "device:001"}},
+		[]yamlNodeItem{{Labels: []string{"Device"}, URI: "device:001"}},
 		nil,
 	)
 
@@ -495,7 +495,7 @@ func TestSnapshotManager_Restore_LockAcquired(t *testing.T) {
 func TestSnapshotManager_Restore_LockReleasedOnError(t *testing.T) {
 	snapDir := t.TempDir()
 	writeTestSnapshot(t, snapDir, "snap-a",
-		[]yamlNodeItem{{Label: "Device", URI: "device:001"}},
+		[]yamlNodeItem{{Labels: []string{"Device"}, URI: "device:001"}},
 		nil,
 	)
 
@@ -530,11 +530,11 @@ func TestSnapshotManager_Restore_LockReleasedOnError(t *testing.T) {
 func TestSnapshotManager_Diff(t *testing.T) {
 	snapDir := t.TempDir()
 	writeTestSnapshot(t, snapDir, "snap-a",
-		[]yamlNodeItem{{Label: "Device", URI: "device:001"}},
+		[]yamlNodeItem{{Labels: []string{"Device"}, URI: "device:001"}},
 		nil,
 	)
 	writeTestSnapshot(t, snapDir, "snap-b",
-		[]yamlNodeItem{{Label: "Device", URI: "device:002"}},
+		[]yamlNodeItem{{Labels: []string{"Device"}, URI: "device:002"}},
 		nil,
 	)
 
@@ -567,8 +567,8 @@ func TestSnapshotManager_LocalDiff(t *testing.T) {
 	snapDir := t.TempDir()
 	writeTestSnapshot(t, snapDir, "snap-a",
 		[]yamlNodeItem{
-			{Label: "Device", URI: "device:001"},
-			{Label: "Device", URI: "device:002"},
+			{Labels: []string{"Device"}, URI: "device:001"},
+			{Labels: []string{"Device"}, URI: "device:002"},
 		},
 		[]yamlRelItem{
 			{Type: "CONNECTS", From: "device:001", To: "device:002"},
@@ -576,8 +576,8 @@ func TestSnapshotManager_LocalDiff(t *testing.T) {
 	)
 	writeTestSnapshot(t, snapDir, "snap-b",
 		[]yamlNodeItem{
-			{Label: "Device", URI: "device:002"},
-			{Label: "Device", URI: "device:003"},
+			{Labels: []string{"Device"}, URI: "device:002"},
+			{Labels: []string{"Device"}, URI: "device:003"},
 		},
 		[]yamlRelItem{
 			{Type: "CONNECTS", From: "device:002", To: "device:003"},
@@ -633,7 +633,7 @@ func TestSnapshotManager_LocalDiff(t *testing.T) {
 func TestCleanup_UnderLimit(t *testing.T) {
 	snapDir := t.TempDir()
 	writeTestSnapshot(t, snapDir, "snap-a",
-		[]yamlNodeItem{{Label: "Device", URI: "device:001"}}, nil,
+		[]yamlNodeItem{{Labels: []string{"Device"}, URI: "device:001"}}, nil,
 	)
 
 	gdb := &mockGraphDB{
@@ -656,7 +656,7 @@ func TestCleanup_UnderLimit(t *testing.T) {
 func TestCleanup_OverLimit(t *testing.T) {
 	snapDir := t.TempDir()
 	writeTestSnapshot(t, snapDir, "snap-c",
-		[]yamlNodeItem{{Label: "Device", URI: "device:003"}}, nil,
+		[]yamlNodeItem{{Labels: []string{"Device"}, URI: "device:003"}}, nil,
 	)
 
 	gdb := &mockGraphDB{
@@ -683,7 +683,7 @@ func TestCleanup_OverLimit(t *testing.T) {
 func TestCleanup_NeverCleansDefault(t *testing.T) {
 	snapDir := t.TempDir()
 	writeTestSnapshot(t, snapDir, "snap-a",
-		[]yamlNodeItem{{Label: "Device", URI: "device:001"}}, nil,
+		[]yamlNodeItem{{Labels: []string{"Device"}, URI: "device:001"}}, nil,
 	)
 
 	gdb := &mockGraphDB{
@@ -710,7 +710,7 @@ func TestCleanup_NeverCleansDefault(t *testing.T) {
 func TestCleanup_TriggeredByEnsureLoaded(t *testing.T) {
 	snapDir := t.TempDir()
 	writeTestSnapshot(t, snapDir, "snap-c",
-		[]yamlNodeItem{{Label: "Device", URI: "device:003"}}, nil,
+		[]yamlNodeItem{{Labels: []string{"Device"}, URI: "device:003"}}, nil,
 	)
 
 	gdb := &mockGraphDB{

@@ -79,10 +79,10 @@ func TestPipeline_MockNetbox_FullPipeline(t *testing.T) {
 		t.Errorf("Nodes count = %d, want %d", len(gm.Nodes), expectedNodes)
 	}
 
-	// 按 Label 统计节点
+	// 按 MostSpecificLabel 统计节点
 	nodeCountByLabel := make(map[string]int)
 	for _, n := range gm.Nodes {
-		nodeCountByLabel[n.Label]++
+		nodeCountByLabel[n.MostSpecificLabel()]++
 	}
 	expectedByLabel := map[string]int{
 		"Device": 3, "Interface": 12, "ISIS": 3, "Link": 2, "Network_Slice": 1,

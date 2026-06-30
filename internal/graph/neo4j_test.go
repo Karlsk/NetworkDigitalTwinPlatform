@@ -793,7 +793,7 @@ func TestBulkCreate_Success(t *testing.T) {
 
 	client := newTestClient(t)
 	nodes := []assembler.Node{
-		{Label: "Device", URI: "device:SN001", Props: map[string]any{"hostname": "r1"}},
+		{Labels: []string{"Device"}, URI: "device:SN001", Props: map[string]any{"hostname": "r1"}},
 	}
 	rels := []assembler.Relation{
 		{Type: "HAS_INTERFACE", From: "device:SN001", To: "iface:SN001_eth0"},
@@ -900,7 +900,7 @@ func TestBulkCreate_EmptyRels(t *testing.T) {
 
 	client := newTestClient(t)
 	nodes := []assembler.Node{
-		{Label: "Device", URI: "device:SN001", Props: map[string]any{"hostname": "r1"}},
+		{Labels: []string{"Device"}, URI: "device:SN001", Props: map[string]any{"hostname": "r1"}},
 	}
 
 	err := client.BulkCreate(context.Background(), "testdb", nodes, nil)
@@ -923,11 +923,11 @@ func TestBulkCreate_MultipleLabels(t *testing.T) {
 
 	client := newTestClient(t)
 	nodes := []assembler.Node{
-		{Label: "Device", URI: "device:SN001", Props: map[string]any{"hostname": "r1"}},
-		{Label: "Device", URI: "device:SN002", Props: map[string]any{"hostname": "r2"}},
-		{Label: "Interface", URI: "iface:SN001_eth0", Props: map[string]any{"status": "Up"}},
-		{Label: "Interface", URI: "iface:SN001_eth1", Props: map[string]any{"status": "Down"}},
-		{Label: "Interface", URI: "iface:SN002_eth0", Props: map[string]any{"status": "Up"}},
+		{Labels: []string{"Device"}, URI: "device:SN001", Props: map[string]any{"hostname": "r1"}},
+		{Labels: []string{"Device"}, URI: "device:SN002", Props: map[string]any{"hostname": "r2"}},
+		{Labels: []string{"Interface"}, URI: "iface:SN001_eth0", Props: map[string]any{"status": "Up"}},
+		{Labels: []string{"Interface"}, URI: "iface:SN001_eth1", Props: map[string]any{"status": "Down"}},
+		{Labels: []string{"Interface"}, URI: "iface:SN002_eth0", Props: map[string]any{"status": "Up"}},
 	}
 
 	err := client.BulkCreate(context.Background(), "testdb", nodes, nil)
@@ -1016,7 +1016,7 @@ func TestBulkCreate_NodeRunError(t *testing.T) {
 
 	client := newTestClient(t)
 	nodes := []assembler.Node{
-		{Label: "Device", URI: "device:SN001", Props: map[string]any{"hostname": "r1"}},
+		{Labels: []string{"Device"}, URI: "device:SN001", Props: map[string]any{"hostname": "r1"}},
 	}
 
 	err := client.BulkCreate(context.Background(), "testdb", nodes, nil)
@@ -1042,7 +1042,7 @@ func TestBulkCreate_RelRunError(t *testing.T) {
 
 	client := newTestClient(t)
 	nodes := []assembler.Node{
-		{Label: "Device", URI: "device:SN001", Props: map[string]any{"hostname": "r1"}},
+		{Labels: []string{"Device"}, URI: "device:SN001", Props: map[string]any{"hostname": "r1"}},
 	}
 	rels := []assembler.Relation{
 		{Type: "HAS_INTERFACE", From: "device:SN001", To: "iface:SN001_eth0"},
@@ -1066,8 +1066,8 @@ func TestBulkCreate_DBPropertyInjected(t *testing.T) {
 
 	client := newTestClient(t)
 	nodes := []assembler.Node{
-		{Label: "Device", URI: "device:SN001", Props: map[string]any{"hostname": "r1"}},
-		{Label: "Interface", URI: "iface:SN001_eth0", Props: map[string]any{"status": "Up"}},
+		{Labels: []string{"Device"}, URI: "device:SN001", Props: map[string]any{"hostname": "r1"}},
+		{Labels: []string{"Interface"}, URI: "iface:SN001_eth0", Props: map[string]any{"status": "Up"}},
 	}
 
 	err := client.BulkCreate(context.Background(), "mydb", nodes, nil)
@@ -1102,7 +1102,7 @@ func TestBulkCreate_NoMutateCallerProps(t *testing.T) {
 	client := newTestClient(t)
 	originalProps := map[string]any{"hostname": "r1"}
 	nodes := []assembler.Node{
-		{Label: "Device", URI: "device:SN001", Props: originalProps},
+		{Labels: []string{"Device"}, URI: "device:SN001", Props: originalProps},
 	}
 
 	err := client.BulkCreate(context.Background(), "testdb", nodes, nil)
@@ -1120,19 +1120,19 @@ func TestBulkCreate_NoMutateCallerProps(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// TestGroupNodesByLabel / TestGroupRelsByType — 辅助函数单元测试
+// TestGroupNodesByLabels / TestGroupRelsByType — 辅助函数单元测试
 // ---------------------------------------------------------------------------
 
-func TestGroupNodesByLabel(t *testing.T) {
+func TestGroupNodesByLabels(t *testing.T) {
 	nodes := []assembler.Node{
-		{Label: "Device", URI: "device:SN001"},
-		{Label: "Interface", URI: "iface:SN001_eth0"},
-		{Label: "Device", URI: "device:SN002"},
+		{Labels: []string{"Device"}, URI: "device:SN001"},
+		{Labels: []string{"Interface"}, URI: "iface:SN001_eth0"},
+		{Labels: []string{"Device"}, URI: "device:SN002"},
 	}
 
-	groups := groupNodesByLabel(nodes)
+	groups := groupNodesByLabels(nodes)
 	if len(groups) != 2 {
-		t.Fatalf("groupNodesByLabel() returned %d groups, want 2", len(groups))
+		t.Fatalf("groupNodesByLabels() returned %d groups, want 2", len(groups))
 	}
 	if len(groups["Device"]) != 2 {
 		t.Errorf("Device group length = %d, want 2", len(groups["Device"]))
@@ -1142,10 +1142,10 @@ func TestGroupNodesByLabel(t *testing.T) {
 	}
 }
 
-func TestGroupNodesByLabel_Empty(t *testing.T) {
-	groups := groupNodesByLabel(nil)
+func TestGroupNodesByLabels_Empty(t *testing.T) {
+	groups := groupNodesByLabels(nil)
 	if len(groups) != 0 {
-		t.Errorf("groupNodesByLabel(nil) returned %d groups, want 0", len(groups))
+		t.Errorf("groupNodesByLabels(nil) returned %d groups, want 0", len(groups))
 	}
 }
 
@@ -1186,7 +1186,7 @@ func TestUpsert_Success(t *testing.T) {
 
 	client := newTestClient(t)
 	nodes := []assembler.Node{
-		{Label: "Device", URI: "device:SN001", Props: map[string]any{"hostname": "r1"}},
+		{Labels: []string{"Device"}, URI: "device:SN001", Props: map[string]any{"hostname": "r1"}},
 	}
 	rels := []assembler.Relation{
 		{Type: "HAS_INTERFACE", From: "device:SN001", To: "iface:SN001_eth0"},
@@ -1311,7 +1311,7 @@ func TestUpsert_EmptyRels(t *testing.T) {
 
 	client := newTestClient(t)
 	nodes := []assembler.Node{
-		{Label: "Device", URI: "device:SN001", Props: map[string]any{"hostname": "r1"}},
+		{Labels: []string{"Device"}, URI: "device:SN001", Props: map[string]any{"hostname": "r1"}},
 	}
 
 	err := client.Upsert(context.Background(), "testdb", nodes, nil)
@@ -1337,11 +1337,11 @@ func TestUpsert_MultipleLabels(t *testing.T) {
 
 	client := newTestClient(t)
 	nodes := []assembler.Node{
-		{Label: "Device", URI: "device:SN001", Props: map[string]any{"hostname": "r1"}},
-		{Label: "Device", URI: "device:SN002", Props: map[string]any{"hostname": "r2"}},
-		{Label: "Interface", URI: "iface:SN001_eth0", Props: map[string]any{"status": "Up"}},
-		{Label: "Interface", URI: "iface:SN001_eth1", Props: map[string]any{"status": "Down"}},
-		{Label: "Interface", URI: "iface:SN002_eth0", Props: map[string]any{"status": "Up"}},
+		{Labels: []string{"Device"}, URI: "device:SN001", Props: map[string]any{"hostname": "r1"}},
+		{Labels: []string{"Device"}, URI: "device:SN002", Props: map[string]any{"hostname": "r2"}},
+		{Labels: []string{"Interface"}, URI: "iface:SN001_eth0", Props: map[string]any{"status": "Up"}},
+		{Labels: []string{"Interface"}, URI: "iface:SN001_eth1", Props: map[string]any{"status": "Down"}},
+		{Labels: []string{"Interface"}, URI: "iface:SN002_eth0", Props: map[string]any{"status": "Up"}},
 	}
 
 	err := client.Upsert(context.Background(), "testdb", nodes, nil)
@@ -1430,7 +1430,7 @@ func TestUpsert_NodeRunError(t *testing.T) {
 
 	client := newTestClient(t)
 	nodes := []assembler.Node{
-		{Label: "Device", URI: "device:SN001", Props: map[string]any{"hostname": "r1"}},
+		{Labels: []string{"Device"}, URI: "device:SN001", Props: map[string]any{"hostname": "r1"}},
 	}
 
 	err := client.Upsert(context.Background(), "testdb", nodes, nil)
@@ -1456,7 +1456,7 @@ func TestUpsert_RelRunError(t *testing.T) {
 
 	client := newTestClient(t)
 	nodes := []assembler.Node{
-		{Label: "Device", URI: "device:SN001", Props: map[string]any{"hostname": "r1"}},
+		{Labels: []string{"Device"}, URI: "device:SN001", Props: map[string]any{"hostname": "r1"}},
 	}
 	rels := []assembler.Relation{
 		{Type: "HAS_INTERFACE", From: "device:SN001", To: "iface:SN001_eth0"},
@@ -1480,8 +1480,8 @@ func TestUpsert_DBPropertyInjected(t *testing.T) {
 
 	client := newTestClient(t)
 	nodes := []assembler.Node{
-		{Label: "Device", URI: "device:SN001", Props: map[string]any{"hostname": "r1"}},
-		{Label: "Interface", URI: "iface:SN001_eth0", Props: map[string]any{"status": "Up"}},
+		{Labels: []string{"Device"}, URI: "device:SN001", Props: map[string]any{"hostname": "r1"}},
+		{Labels: []string{"Interface"}, URI: "iface:SN001_eth0", Props: map[string]any{"status": "Up"}},
 	}
 
 	err := client.Upsert(context.Background(), "mydb", nodes, nil)
@@ -1523,7 +1523,7 @@ func TestUpsert_NoMutateCallerProps(t *testing.T) {
 	client := newTestClient(t)
 	originalProps := map[string]any{"hostname": "r1"}
 	nodes := []assembler.Node{
-		{Label: "Device", URI: "device:SN001", Props: originalProps},
+		{Labels: []string{"Device"}, URI: "device:SN001", Props: originalProps},
 	}
 
 	err := client.Upsert(context.Background(), "testdb", nodes, nil)
@@ -1549,7 +1549,7 @@ func TestUpsert_MERGEsemantics(t *testing.T) {
 
 	client := newTestClient(t)
 	nodes := []assembler.Node{
-		{Label: "Device", URI: "device:SN001", Props: map[string]any{"hostname": "r1"}},
+		{Labels: []string{"Device"}, URI: "device:SN001", Props: map[string]any{"hostname": "r1"}},
 	}
 	rels := []assembler.Relation{
 		{Type: "HAS_INTERFACE", From: "device:SN001", To: "iface:SN001_eth0"},
@@ -2188,7 +2188,7 @@ func TestCloneDB_SessionClosed(t *testing.T) {
 func TestBuildCypher_Create(t *testing.T) {
 	client := newTestClient(t)
 	nodes := []assembler.Node{
-		{Label: "Device", URI: "device:SN001", Props: map[string]any{"hostname": "r1"}},
+		{Labels: []string{"Device"}, URI: "device:SN001", Props: map[string]any{"hostname": "r1"}},
 	}
 
 	cypher, params := client.BuildCypher("create", "testdb", nodes, nil, nil)
@@ -2213,7 +2213,7 @@ func TestBuildCypher_Create(t *testing.T) {
 func TestBuildCypher_Upsert(t *testing.T) {
 	client := newTestClient(t)
 	nodes := []assembler.Node{
-		{Label: "Device", URI: "device:SN001", Props: map[string]any{"hostname": "r1"}},
+		{Labels: []string{"Device"}, URI: "device:SN001", Props: map[string]any{"hostname": "r1"}},
 	}
 
 	cypher, params := client.BuildCypher("upsert", "testdb", nodes, nil, nil)
@@ -2298,8 +2298,8 @@ func TestBuildCypher_UnknownAction(t *testing.T) {
 func TestBuildCypher_MultipleLabels(t *testing.T) {
 	client := newTestClient(t)
 	nodes := []assembler.Node{
-		{Label: "Device", URI: "device:SN001", Props: map[string]any{"hostname": "r1"}},
-		{Label: "Interface", URI: "iface:SN001_eth0", Props: map[string]any{"status": "Up"}},
+		{Labels: []string{"Device"}, URI: "device:SN001", Props: map[string]any{"hostname": "r1"}},
+		{Labels: []string{"Interface"}, URI: "iface:SN001_eth0", Props: map[string]any{"status": "Up"}},
 	}
 
 	cypher, params := client.BuildCypher("create", "testdb", nodes, nil, nil)
@@ -2325,7 +2325,7 @@ func TestBuildCypher_MultipleLabels(t *testing.T) {
 func TestBuildCypher_DBParamPresent(t *testing.T) {
 	client := newTestClient(t)
 	nodes := []assembler.Node{
-		{Label: "Device", URI: "device:A", Props: map[string]any{"hostname": "r1"}},
+		{Labels: []string{"Device"}, URI: "device:A", Props: map[string]any{"hostname": "r1"}},
 	}
 	rels := []assembler.Relation{
 		{Type: "HAS_INTERFACE", From: "device:A", To: "iface:eth0"},
@@ -2358,8 +2358,8 @@ func TestBuildCypher_EmptyInput(t *testing.T) {
 func TestBuildCypher_ParamsKeyFormat(t *testing.T) {
 	client := newTestClient(t)
 	nodes := []assembler.Node{
-		{Label: "Device", URI: "device:A"},
-		{Label: "Device", URI: "device:B"},
+		{Labels: []string{"Device"}, URI: "device:A"},
+		{Labels: []string{"Device"}, URI: "device:B"},
 	}
 
 	_, params := client.BuildCypher("create", "testdb", nodes, nil, nil)
@@ -2385,7 +2385,7 @@ func TestBuildCypher_NoSession(t *testing.T) {
 
 	client := newTestClient(t)
 	nodes := []assembler.Node{
-		{Label: "Device", URI: "device:A"},
+		{Labels: []string{"Device"}, URI: "device:A"},
 	}
 	rels := []assembler.Relation{
 		{Type: "HAS_INTERFACE", From: "device:A", To: "iface:eth0"},

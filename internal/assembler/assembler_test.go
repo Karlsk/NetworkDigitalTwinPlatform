@@ -97,8 +97,8 @@ func TestAssemble_DeviceNodeConversion(t *testing.T) {
 	}
 
 	node := gm.Nodes[0]
-	if node.Label != "Device" {
-		t.Errorf("Label = %q, want %q", node.Label, "Device")
+	if node.MostSpecificLabel() != "Device" {
+		t.Errorf("MostSpecificLabel() = %q, want %q", node.MostSpecificLabel(), "Device")
 	}
 	if node.URI != "device:SN12345" {
 		t.Errorf("URI = %q, want %q", node.URI, "device:SN12345")
@@ -155,8 +155,8 @@ func TestAssemble_InterfaceNodeConversion(t *testing.T) {
 	}
 
 	node := gm.Nodes[0]
-	if node.Label != "Interface" {
-		t.Errorf("Label = %q, want %q", node.Label, "Interface")
+	if node.MostSpecificLabel() != "Interface" {
+		t.Errorf("MostSpecificLabel() = %q, want %q", node.MostSpecificLabel(), "Interface")
 	}
 	if node.URI != "iface:SN001_GE1/0/1" {
 		t.Errorf("URI = %q, want %q", node.URI, "iface:SN001_GE1/0/1")
