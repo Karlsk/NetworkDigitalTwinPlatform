@@ -11,6 +11,7 @@ import (
 	"gitlab.com/pml/network-digital-twin/internal/assembler"
 	"gitlab.com/pml/network-digital-twin/internal/config"
 	"gitlab.com/pml/network-digital-twin/internal/connector"
+	"gitlab.com/pml/network-digital-twin/internal/connector/controller"
 	"gitlab.com/pml/network-digital-twin/internal/connector/mock"
 	"gitlab.com/pml/network-digital-twin/internal/connector/netbox"
 	"gitlab.com/pml/network-digital-twin/internal/graph"
@@ -59,6 +60,7 @@ func main() {
 		return mock.NewMockConnector(name, dataDir, entityTypes), nil
 	})
 	factory.RegisterBuilder("netbox", netbox.Builder())
+	factory.RegisterBuilder("controller", controller.Builder())
 
 	// 5.2 从 connectors.yaml 配置批量创建并注册
 	if err := factory.CreateFromConfig("configs/connectors.yaml", connRegistry); err != nil {

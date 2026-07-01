@@ -1,0 +1,33 @@
+apiVersion: twin.io/v1
+kind: EntityType
+metadata:
+  name: BGP
+  labels: [Protocol, Network]
+spec:
+  identity:
+    stableKeys: [bgp_id]
+  uriTemplate: "bgp:{bgp_id}"
+  fieldMapping: {}
+  normalize: []
+  relationFields:
+    run_on:
+      relationType: RUNS_ON
+  properties:
+    bgp_id:
+      type: string
+      required: true
+    peer_ip:
+      type: string
+      required: true
+    peer_as:
+      type: int
+    state:
+      type: string
+      enum: [Established, Connect, Idle, Active, OpenSent, OpenConfirm]
+      default: "Connect"
+    uptime:
+      type: string
+    router_id:
+      type: string
+    local_as:
+      type: int

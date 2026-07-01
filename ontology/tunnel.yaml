@@ -1,0 +1,34 @@
+apiVersion: twin.io/v1
+kind: EntityType
+metadata:
+  name: Tunnel
+  labels: [Service, Network]
+spec:
+  identity:
+    stableKeys: [tunnel_id]
+  uriTemplate: "tunnel:{tunnel_id}"
+  fieldMapping: {}
+  normalize: []
+  relationFields:
+    for_vpn:
+      relationType: TUNNEL_FOR
+  properties:
+    tunnel_id:
+      type: string
+      required: true
+    name:
+      type: string
+    tunnel_name:
+      type: string
+    src_device:
+      type: string
+    dst_device:
+      type: string
+    vpn_id:
+      type: string
+    status:
+      type: string
+      enum: [Up, Down]
+      default: "Down"
+    path_count:
+      type: int

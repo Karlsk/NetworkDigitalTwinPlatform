@@ -10,13 +10,17 @@ connectors:
       data_dir: testdata/mock_cmdb
     entity_types: [ISIS, Link, Network_Slice]
 
-# Netbox connector (uncomment to enable)
-# - name: netbox-1
-#   type: netbox
-#   config:
-#     base_url: "http://netbox.example.com"
-#     timeout: "30s"
-#   entity_types: [Device, Interface]
-#   auth:
-#     type: token
-#     token_env: NETBOX_TOKEN
+# Controller connector (real device)
+  - name: controller-1
+    type: controller
+    config:
+      base_url: "https://192.168.118.176:8711"
+      timeout: "60s"
+      token_url: "/oauth/token"
+      username: "zhangsan"
+      password: "tgb.258"
+      des_secret_key: "9mng65v8jf4lxn93nabf981m"
+      device_id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+    entity_types: [Device, Interface, Link, Alarm, VPN, Tunnel, ISIS, BGP]
+    auth:
+      type: bearer

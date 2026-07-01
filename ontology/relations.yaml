@@ -37,3 +37,19 @@ metadata:
 spec:
   source: [Alarm]
   target: [Interface]
+---
+apiVersion: twin.io/v1
+kind: RelationType
+metadata:
+  name: HAS_BGP_PEER
+spec:
+  source: [Device]
+  target: [BGP]
+---
+apiVersion: twin.io/v1
+kind: RelationType
+metadata:
+  name: TUNNEL_FOR
+spec:
+  source: [Tunnel]
+  target: [VPN]

@@ -1,0 +1,39 @@
+apiVersion: twin.io/v1
+kind: EntityType
+metadata:
+  name: VPN
+  labels: [Service, Network]
+spec:
+  identity:
+    stableKeys: [vpn_id]
+  uriTemplate: "vpn:{vpn_id}"
+  fieldMapping: {}
+  normalize: []
+  relationFields: {}
+  properties:
+    vpn_id:
+      type: string
+      required: true
+    name:
+      type: string
+    svc_type:
+      type: string
+      enum: [mpls-vpn, vxlan-evpn, vpls, vpws]
+    tunnel_type:
+      type: string
+      enum: [sr-mpls, srv6, mpls]
+    topology:
+      type: string
+      enum: [any-to-any, hub-spoke]
+    site_count:
+      type: int
+    sna_count:
+      type: int
+    status:
+      type: string
+      enum: [Up, Down]
+      default: "Up"
+    create_time:
+      type: string
+    update_time:
+      type: string

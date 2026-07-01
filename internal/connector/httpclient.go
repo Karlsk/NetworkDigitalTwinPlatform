@@ -60,6 +60,13 @@ func WithRateLimit(qps float64) HTTPOption {
 	}
 }
 
+// WithTransport 设置自定义 HTTP Transport（用于跳过 TLS 验证等场景）。
+func WithTransport(t http.RoundTripper) HTTPOption {
+	return func(c *HTTPClient) {
+		c.client.Transport = t
+	}
+}
+
 // NewHTTPClient 创建带默认配置的 HTTPClient。
 // 默认: 超时 30s，QPS 10（burst 10）。
 func NewHTTPClient(opts ...HTTPOption) *HTTPClient {
@@ -94,6 +101,12 @@ func (c *HTTPClient) applyAuth(req *http.Request) {
 			password = os.Getenv(c.auth.PasswordEnv)
 		}
 		req.SetBasicAuth(c.auth.Username, password)
+	case "bearer":
+		token := c.auth.Token // 直接值优先
+		if token == "" && c.auth.TokenEnv != "" {
+			token = os.Getenv(c.auth.TokenEnv)
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
 	}
 }
 
@@ -182,6 +195,8 @@ func (c *HTTPClient) Get(ctx context.Context, path string) (*http.Response, erro
 	if err != nil {
 		return nil, fmt.Errorf("create GET request %s: %w", path, err)
 	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Content-Type", "application/json")
 	return c.Do(ctx, req)
 }
 
@@ -191,6 +206,16 @@ func (c *HTTPClient) Post(ctx context.Context, path string, body io.Reader) (*ht
 	if err != nil {
 		return nil, fmt.Errorf("create POST request %s: %w", path, err)
 	}
+	return c.Do(ctx, req)
+}
+
+// PostJSON 发送 JSON POST 请求，自动设置 Content-Type 头。
+func (c *HTTPClient) PostJSON(ctx context.Context, path string, body io.Reader) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, path, body)
+	if err != nil {
+		return nil, fmt.Errorf("create POST request %s: %w", path, err)
+	}
+	req.Header.Set("Content-Type", "application/json")
 	return c.Do(ctx, req)
 }
 
@@ -210,6 +235,12 @@ func (c *HTTPClient) Delete(ctx context.Context, path string) (*http.Response, e
 		return nil, fmt.Errorf("create DELETE request %s: %w", path, err)
 	}
 	return c.Do(ctx, req)
+}
+
+// SetAuthToken 动态更新认证 Token。
+// 用于 Bearer Token 自动刷新场景，线程安全由调用方保证。
+func (c *HTTPClient) SetAuthToken(token string) {
+	c.auth.Token = token
 }
 
 // resolveURL 将 baseURL + relativeURL 拼接为完整 URL。

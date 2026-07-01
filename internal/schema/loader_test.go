@@ -376,11 +376,11 @@ func TestLoadOntologyDir(t *testing.T) {
 	}
 
 	// Verify counts per spec SC-002 and SC-003
-	if len(entityTypes) != 6 {
-		t.Errorf("entityTypes count = %d, want 6", len(entityTypes))
+	if len(entityTypes) != 9 {
+		t.Errorf("entityTypes count = %d, want 9", len(entityTypes))
 	}
-	if len(relationTypes) != 5 {
-		t.Errorf("relationTypes count = %d, want 5", len(relationTypes))
+	if len(relationTypes) != 7 {
+		t.Errorf("relationTypes count = %d, want 7", len(relationTypes))
 	}
 
 	// Build lookup maps

@@ -110,11 +110,11 @@ func TestNewSchemaRegistry(t *testing.T) {
 
 func TestLoad_ValidOntology(t *testing.T) {
 	r := loadTestOntology(t)
-	if got := len(r.ListEntityTypes()); got != 6 {
-		t.Errorf("ListEntityTypes() len = %d, want 6", got)
+	if got := len(r.ListEntityTypes()); got != 9 {
+		t.Errorf("ListEntityTypes() len = %d, want 9", got)
 	}
-	if got := len(r.ListRelationTypes()); got != 5 {
-		t.Errorf("ListRelationTypes() len = %d, want 5", got)
+	if got := len(r.ListRelationTypes()); got != 7 {
+		t.Errorf("ListRelationTypes() len = %d, want 7", got)
 	}
 }
 
@@ -204,14 +204,14 @@ func TestGetRelationType_NotFound(t *testing.T) {
 func TestListEntityTypes_Content(t *testing.T) {
 	r := loadTestOntology(t)
 	ets := r.ListEntityTypes()
-	if len(ets) != 6 {
-		t.Fatalf("ListEntityTypes() len = %d, want 6", len(ets))
+	if len(ets) != 9 {
+		t.Fatalf("ListEntityTypes() len = %d, want 9", len(ets))
 	}
 	names := make(map[string]bool)
 	for _, et := range ets {
 		names[et.Metadata.Name] = true
 	}
-	for _, name := range []string{"Device", "Interface", "ISIS", "Link", "Network_Slice", "Alarm"} {
+	for _, name := range []string{"Device", "Interface", "ISIS", "Link", "Network_Slice", "Alarm", "VPN", "BGP", "Tunnel"} {
 		if !names[name] {
 			t.Errorf("EntityType %q not found in list", name)
 		}
@@ -221,14 +221,14 @@ func TestListEntityTypes_Content(t *testing.T) {
 func TestListRelationTypes_Content(t *testing.T) {
 	r := loadTestOntology(t)
 	rts := r.ListRelationTypes()
-	if len(rts) != 5 {
-		t.Fatalf("ListRelationTypes() len = %d, want 5", len(rts))
+	if len(rts) != 7 {
+		t.Fatalf("ListRelationTypes() len = %d, want 7", len(rts))
 	}
 	names := make(map[string]bool)
 	for _, rt := range rts {
 		names[rt.Metadata.Name] = true
 	}
-	for _, name := range []string{"HAS_INTERFACE", "RUNS_ON", "ENDPOINT", "CONNECTS_TO", "OCCURRED_ON"} {
+	for _, name := range []string{"HAS_INTERFACE", "RUNS_ON", "ENDPOINT", "CONNECTS_TO", "OCCURRED_ON", "HAS_BGP_PEER", "TUNNEL_FOR"} {
 		if !names[name] {
 			t.Errorf("RelationType %q not found in list", name)
 		}
