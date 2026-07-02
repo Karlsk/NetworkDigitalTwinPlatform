@@ -22,9 +22,11 @@ type mockGraphDB struct {
 	listDBsErr    error
 
 	// 可配置返回数据
-	queryResults  []map[string]any
-	hasDBResult   map[string]bool // db name → 是否存在
-	listDBsResult []string
+	queryResults    []map[string]any
+	queryResultsSeq [][]map[string]any // 按序返回不同查询结果
+	querySeqIdx     int                // queryResultsSeq 当前索引
+	hasDBResult     map[string]bool    // db name → 是否存在
+	listDBsResult   []string
 
 	// 调用记录
 	clearDBCalls    []string
@@ -84,6 +86,15 @@ func (m *mockGraphDB) DeleteByURIs(_ context.Context, _ string, _ []string) erro
 
 func (m *mockGraphDB) Query(_ context.Context, db string, cypher string, params map[string]any) ([]map[string]any, error) {
 	m.queryCalls = append(m.queryCalls, queryCall{DB: db, Cypher: cypher, Params: params})
+	// 按序返回不同结果（用于 Diff 方法多条 Cypher 查询测试）
+	if m.queryResultsSeq != nil {
+		if m.querySeqIdx < len(m.queryResultsSeq) {
+			result := m.queryResultsSeq[m.querySeqIdx]
+			m.querySeqIdx++
+			return result, m.queryErr
+		}
+		return nil, m.queryErr
+	}
 	return m.queryResults, m.queryErr
 }
 

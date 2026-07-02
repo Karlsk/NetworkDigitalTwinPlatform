@@ -376,6 +376,72 @@ func (sm *SnapshotManager) Diff(ctx context.Context, a, b string) (*SnapshotDiff
 		}
 	}
 
+	// === 第 5 条: 节点属性级对比 ===
+	changedNodeRows, err := sm.graph.Query(ctx, b,
+		`MATCH (a {_db: $a}) MATCH (b {_db: $b}) `+
+			`WHERE a.uri = b.uri AND labels(a) = labels(b) `+
+			`WITH a, b, [k IN keys(a) WHERE k <> '_db' AND a[k] <> b[k]] AS diffKeys `+
+			`WHERE size(diffKeys) > 0 `+
+			`RETURN a.uri AS uri, labels(a) AS labels, `+
+			`properties(a) AS aProps, properties(b) AS bProps`,
+		map[string]any{"a": a, "b": b})
+	if err != nil {
+		return nil, fmt.Errorf("diff changed nodes: %w", err)
+	}
+	for _, row := range changedNodeRows {
+		uri, _ := row["uri"].(string)
+		labels := anyToStringSlice(row["labels"])
+		aProps := extractProps(row["aProps"])
+		bProps := extractProps(row["bProps"])
+		added, removed, modified := compareProps(aProps, bProps)
+		if len(added) > 0 || len(removed) > 0 || len(modified) > 0 {
+			label := ""
+			if len(labels) > 0 {
+				label = labels[len(labels)-1] // MostSpecificLabel
+			}
+			diff.ChangedNodes = append(diff.ChangedNodes, NodeChange{
+				URI:            uri,
+				Label:          label,
+				AddedFields:    added,
+				RemovedFields:  removed,
+				ModifiedFields: modified,
+			})
+		}
+	}
+
+	// === 第 6 条: 关系属性级对比 ===
+	changedRelRows, err := sm.graph.Query(ctx, b,
+		`MATCH (sa)-[ra]->(ea), (sb)-[rb]->(eb) `+
+			`WHERE sa._db = $a AND sb._db = $b `+
+			`AND sa.uri = sb.uri AND ea.uri = eb.uri `+
+			`AND type(ra) = type(rb) `+
+			`WITH ra, rb, [k IN keys(ra) WHERE ra[k] <> rb[k]] AS diffKeys `+
+			`WHERE size(diffKeys) > 0 `+
+			`RETURN type(ra) AS type, startNode(ra).uri AS from, endNode(ra).uri AS to, `+
+			`properties(ra) AS aProps, properties(rb) AS bProps`,
+		map[string]any{"a": a, "b": b})
+	if err != nil {
+		return nil, fmt.Errorf("diff changed rels: %w", err)
+	}
+	for _, row := range changedRelRows {
+		typ, _ := row["type"].(string)
+		from, _ := row["from"].(string)
+		to, _ := row["to"].(string)
+		aProps := extractProps(row["aProps"])
+		bProps := extractProps(row["bProps"])
+		added, removed, modified := compareProps(aProps, bProps)
+		if len(added) > 0 || len(removed) > 0 || len(modified) > 0 {
+			diff.ChangedRels = append(diff.ChangedRels, RelChange{
+				Type:           typ,
+				From:           from,
+				To:             to,
+				AddedFields:    added,
+				RemovedFields:  removed,
+				ModifiedFields: modified,
+			})
+		}
+	}
+
 	return diff, nil
 }
 

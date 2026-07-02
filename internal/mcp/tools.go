@@ -105,6 +105,8 @@ type SnapshotDiffOutput struct {
 	RemovedNodes int `json:"removed_nodes"`
 	AddedRels    int `json:"added_rels"`
 	RemovedRels  int `json:"removed_rels"`
+	ChangedNodes int `json:"changed_nodes"`
+	ChangedRels  int `json:"changed_relations"`
 }
 
 // handleQuerySnapshot 查询快照列表或对比快照差异。
@@ -142,6 +144,8 @@ func (h *toolHandlers) handleQuerySnapshot(
 			RemovedNodes: len(diff.RemovedNodes),
 			AddedRels:    len(diff.AddedRels),
 			RemovedRels:  len(diff.RemovedRels),
+			ChangedNodes: len(diff.ChangedNodes),
+			ChangedRels:  len(diff.ChangedRels),
 		}
 		slog.Info("query_snapshot diff completed", "snap_a", in.SnapA, "snap_b", in.SnapB)
 		return nil, QuerySnapshotOutput{Diff: &out}, nil

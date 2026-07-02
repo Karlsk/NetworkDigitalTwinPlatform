@@ -556,9 +556,9 @@ func TestSnapshotManager_Diff(t *testing.T) {
 		t.Errorf("BulkCreate calls = %d, want 2", len(gdb.bulkCreateCalls))
 	}
 
-	// Query 被调用 4 次（added nodes, removed nodes, added rels, removed rels）
-	if len(gdb.queryCalls) != 4 {
-		t.Errorf("Query calls = %d, want 4", len(gdb.queryCalls))
+	// Query 被调用 6 次（added nodes, removed nodes, added rels, removed rels, changed nodes, changed rels）
+	if len(gdb.queryCalls) != 6 {
+		t.Errorf("Query calls = %d, want 6", len(gdb.queryCalls))
 	}
 }
 
@@ -1313,5 +1313,219 @@ func TestLocalDiff_ExistingLogicPreserved(t *testing.T) {
 	// device:002 存在于两边且属性相同，ChangedNodes 应为空
 	if len(diff.ChangedNodes) != 0 {
 		t.Errorf("ChangedNodes = %d, want 0 (device:002 props identical)", len(diff.ChangedNodes))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// V1-13: Cypher Diff 属性级对比测试
+// ---------------------------------------------------------------------------
+
+// TestDiff_ChangedNodes 验证 Cypher Diff 方法正确报告节点属性级变更。
+func TestDiff_ChangedNodes(t *testing.T) {
+	snapDir := t.TempDir()
+	writeTestSnapshot(t, snapDir, "snap-a",
+		[]yamlNodeItem{{Labels: []string{"Device"}, URI: "device:001"}},
+		nil,
+	)
+	writeTestSnapshot(t, snapDir, "snap-b",
+		[]yamlNodeItem{{Labels: []string{"Device"}, URI: "device:001"}},
+		nil,
+	)
+
+	// 配置 6 次 Query 的返回结果
+	// Query 1: added nodes (db=b) → 空
+	// Query 2: removed nodes (db=a) → 空
+	// Query 3: added rels (db=b) → 空
+	// Query 4: removed rels (db=a) → 空
+	// Query 5: changed nodes (db=b) → 1 条属性变更记录
+	// Query 6: changed rels (db=b) → 空
+	gdb := &mockGraphDB{
+		hasDBResult: map[string]bool{"snap-a": false, "snap-b": false},
+		queryResultsSeq: [][]map[string]any{
+			nil, // Query 1: added nodes
+			nil, // Query 2: removed nodes
+			nil, // Query 3: added rels
+			nil, // Query 4: removed rels
+			// Query 5: changed nodes
+			{
+				{
+					"uri":    "device:001",
+					"labels": []any{"Resource", "Device"},
+					"aProps": map[string]any{"hostname": "r1", "status": "up"},
+					"bProps": map[string]any{"hostname": "r1", "status": "down", "mtu": 9000},
+				},
+			},
+			nil, // Query 6: changed rels
+		},
+	}
+	mgr := NewSnapshotManager(gdb, NewGraphLock(), snapDir, 5)
+
+	diff, err := mgr.Diff(context.Background(), "snap-a", "snap-b")
+	if err != nil {
+		t.Fatalf("Diff() error = %v", err)
+	}
+
+	// 验证 ChangedNodes
+	if len(diff.ChangedNodes) != 1 {
+		t.Fatalf("ChangedNodes = %d, want 1", len(diff.ChangedNodes))
+	}
+	nc := diff.ChangedNodes[0]
+	if nc.URI != "device:001" {
+		t.Errorf("URI = %q, want %q", nc.URI, "device:001")
+	}
+	if nc.Label != "Device" {
+		t.Errorf("Label = %q, want %q (MostSpecificLabel)", nc.Label, "Device")
+	}
+	// status 从 up 变为 down → ModifiedFields
+	if len(nc.ModifiedFields) != 1 {
+		t.Errorf("ModifiedFields len = %d, want 1", len(nc.ModifiedFields))
+	}
+	statusFC, ok := nc.ModifiedFields["status"]
+	if !ok {
+		t.Error("ModifiedFields[status] not found")
+	} else {
+		if statusFC.OldValue != "up" || statusFC.NewValue != "down" {
+			t.Errorf("status FieldChange = {%v, %v}, want {up, down}", statusFC.OldValue, statusFC.NewValue)
+		}
+	}
+	// mtu 在 b 中有而 a 中无 → AddedFields
+	if len(nc.AddedFields) != 1 {
+		t.Errorf("AddedFields len = %d, want 1", len(nc.AddedFields))
+	}
+	if nc.AddedFields["mtu"] != 9000 {
+		t.Errorf("AddedFields[mtu] = %v, want 9000", nc.AddedFields["mtu"])
+	}
+}
+
+// TestDiff_ChangedRels 验证 Cypher Diff 方法正确报告关系属性级变更。
+func TestDiff_ChangedRels(t *testing.T) {
+	snapDir := t.TempDir()
+	writeTestSnapshot(t, snapDir, "snap-a",
+		[]yamlNodeItem{{Labels: []string{"Device"}, URI: "device:001"}},
+		nil,
+	)
+	writeTestSnapshot(t, snapDir, "snap-b",
+		[]yamlNodeItem{{Labels: []string{"Device"}, URI: "device:001"}},
+		nil,
+	)
+
+	gdb := &mockGraphDB{
+		hasDBResult: map[string]bool{"snap-a": false, "snap-b": false},
+		queryResultsSeq: [][]map[string]any{
+			nil, // Query 1: added nodes
+			nil, // Query 2: removed nodes
+			nil, // Query 3: added rels
+			nil, // Query 4: removed rels
+			nil, // Query 5: changed nodes
+			// Query 6: changed rels
+			{
+				{
+					"type":   "CONNECTS",
+					"from":   "device:001",
+					"to":     "device:002",
+					"aProps": map[string]any{"bandwidth": 100},
+					"bProps": map[string]any{"bandwidth": 200},
+				},
+			},
+		},
+	}
+	mgr := NewSnapshotManager(gdb, NewGraphLock(), snapDir, 5)
+
+	diff, err := mgr.Diff(context.Background(), "snap-a", "snap-b")
+	if err != nil {
+		t.Fatalf("Diff() error = %v", err)
+	}
+
+	if len(diff.ChangedRels) != 1 {
+		t.Fatalf("ChangedRels = %d, want 1", len(diff.ChangedRels))
+	}
+	rc := diff.ChangedRels[0]
+	if rc.Type != "CONNECTS" {
+		t.Errorf("Type = %q, want %q", rc.Type, "CONNECTS")
+	}
+	if rc.From != "device:001" {
+		t.Errorf("From = %q, want %q", rc.From, "device:001")
+	}
+	if rc.To != "device:002" {
+		t.Errorf("To = %q, want %q", rc.To, "device:002")
+	}
+	if len(rc.ModifiedFields) != 1 {
+		t.Fatalf("ModifiedFields len = %d, want 1", len(rc.ModifiedFields))
+	}
+	bwFC, ok := rc.ModifiedFields["bandwidth"]
+	if !ok {
+		t.Error("ModifiedFields[bandwidth] not found")
+	} else {
+		if bwFC.OldValue != 100 || bwFC.NewValue != 200 {
+			t.Errorf("bandwidth FieldChange = {%v, %v}, want {100, 200}", bwFC.OldValue, bwFC.NewValue)
+		}
+	}
+}
+
+// TestDiff_NoPropertyChange 验证无属性变更时 ChangedNodes/ChangedRels 为空。
+func TestDiff_NoPropertyChange(t *testing.T) {
+	snapDir := t.TempDir()
+	writeTestSnapshot(t, snapDir, "snap-a",
+		[]yamlNodeItem{{Labels: []string{"Device"}, URI: "device:001"}},
+		nil,
+	)
+	writeTestSnapshot(t, snapDir, "snap-b",
+		[]yamlNodeItem{{Labels: []string{"Device"}, URI: "device:001"}},
+		nil,
+	)
+
+	gdb := &mockGraphDB{
+		hasDBResult: map[string]bool{"snap-a": false, "snap-b": false},
+		queryResultsSeq: [][]map[string]any{
+			nil, // Query 1: added nodes
+			nil, // Query 2: removed nodes
+			nil, // Query 3: added rels
+			nil, // Query 4: removed rels
+			nil, // Query 5: changed nodes → 空
+			nil, // Query 6: changed rels → 空
+		},
+	}
+	mgr := NewSnapshotManager(gdb, NewGraphLock(), snapDir, 5)
+
+	diff, err := mgr.Diff(context.Background(), "snap-a", "snap-b")
+	if err != nil {
+		t.Fatalf("Diff() error = %v", err)
+	}
+
+	if len(diff.ChangedNodes) != 0 {
+		t.Errorf("ChangedNodes = %d, want 0", len(diff.ChangedNodes))
+	}
+	if len(diff.ChangedRels) != 0 {
+		t.Errorf("ChangedRels = %d, want 0", len(diff.ChangedRels))
+	}
+}
+
+// TestDiff_QueryCount 验证 Diff 方法调用 Query 6 次（原 4 + 新增 2）。
+func TestDiff_QueryCount(t *testing.T) {
+	snapDir := t.TempDir()
+	writeTestSnapshot(t, snapDir, "snap-a",
+		[]yamlNodeItem{{Labels: []string{"Device"}, URI: "device:001"}},
+		nil,
+	)
+	writeTestSnapshot(t, snapDir, "snap-b",
+		[]yamlNodeItem{{Labels: []string{"Device"}, URI: "device:002"}},
+		nil,
+	)
+
+	gdb := &mockGraphDB{
+		hasDBResult: map[string]bool{"snap-a": false, "snap-b": false},
+		queryResultsSeq: [][]map[string]any{
+			nil, nil, nil, nil, nil, nil,
+		},
+	}
+	mgr := NewSnapshotManager(gdb, NewGraphLock(), snapDir, 5)
+
+	_, err := mgr.Diff(context.Background(), "snap-a", "snap-b")
+	if err != nil {
+		t.Fatalf("Diff() error = %v", err)
+	}
+
+	if len(gdb.queryCalls) != 6 {
+		t.Errorf("Query calls = %d, want 6", len(gdb.queryCalls))
 	}
 }

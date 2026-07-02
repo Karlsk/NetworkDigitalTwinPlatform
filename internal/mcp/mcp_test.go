@@ -455,6 +455,52 @@ func TestSyncDataError(t *testing.T) {
 // TC-M11: query_snapshot list 错误路径 — mock List 返回 error
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// V1-13: query_snapshot diff — ChangedNodes/ChangedRels 统计
+// ---------------------------------------------------------------------------
+
+func TestQuerySnapshotDiff_ChangedStats(t *testing.T) {
+	mockDiff := &snapshot.SnapshotDiff{
+		ChangedNodes: []snapshot.NodeChange{
+			{URI: "device:001", Label: "Device", ModifiedFields: map[string]snapshot.FieldChange{"status": {OldValue: "up", NewValue: "down"}}},
+			{URI: "device:002", Label: "Device", AddedFields: map[string]any{"mtu": 9000}},
+		},
+		ChangedRels: []snapshot.RelChange{
+			{Type: "CONNECTS", From: "device:001", To: "device:002", ModifiedFields: map[string]snapshot.FieldChange{"bandwidth": {OldValue: 100, NewValue: 200}}},
+		},
+	}
+	h := &toolHandlers{
+		analysisSvc: &mockAnalysisService{},
+		snapshotSvc: &mockSnapshotService{diffResult: mockDiff},
+		syncSvc:     &mockSyncService{},
+	}
+	cs := newTestServer(t, h)
+
+	ctx := context.Background()
+	res, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name:      "query_snapshot",
+		Arguments: map[string]any{"action": "diff", "snap_a": "snap-001", "snap_b": "snap-002"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool(query_snapshot) error = %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("CallTool(query_snapshot) IsError=true, content=%v", res.Content)
+	}
+
+	var out QuerySnapshotOutput
+	extractStructuredOutput(t, res.StructuredContent, &out)
+	if out.Diff == nil {
+		t.Fatal("Diff is nil")
+	}
+	if out.Diff.ChangedNodes != 2 {
+		t.Errorf("Diff.ChangedNodes = %d, want 2", out.Diff.ChangedNodes)
+	}
+	if out.Diff.ChangedRels != 1 {
+		t.Errorf("Diff.ChangedRels = %d, want 1", out.Diff.ChangedRels)
+	}
+}
+
 func TestQuerySnapshotListError(t *testing.T) {
 	h := &toolHandlers{
 		analysisSvc: &mockAnalysisService{},
