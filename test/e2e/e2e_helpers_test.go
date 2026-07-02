@@ -8,7 +8,10 @@ package e2e
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -266,4 +269,76 @@ func backupAndRestoreDefault(t *testing.T, client graph.GraphDB) func() {
 		}
 		_ = client.ClearDB(ctx2, backupDB)
 	}
+}
+
+// setupE2EControllerServer 创建模拟 Controller API 的 httptest server。
+// 返回包含 Device/Interface/Link/Alarm/VPN/Tunnel/ISIS/BGP 8 种实体的最小 mock 数据。
+func setupE2EControllerServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	mux := http.NewServeMux()
+
+	mux.HandleFunc("/oauth/token", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{"access_token": "e2e-token", "expires_in": 3600})
+	})
+
+	mux.HandleFunc("/api/no/config/terra-pe:peInfos/peInfos", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{
+			"peInfo": []map[string]any{
+				{
+					"id": "e2e-dev-001", "name": "E2E-PE01", "pe-alias": "E2E-PE01",
+					"node-type": "PE", "vendor-id": "H3C", "product-name": "CR16000",
+					"management-ip": "10.0.0.1", "connect-status": "UP",
+					"peports": map[string]any{
+						"peport-info": []any{
+							map[string]any{"id": "e2e-port-001", "name": "GE0/0/1", "status": "UP", "total-bandwidth": 10000},
+						},
+					},
+				},
+			},
+		})
+	})
+
+	mux.HandleFunc("/api/sr/config/network-topology:network-topology/topology/linksInfo", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode([]map[string]any{})
+	})
+
+	mux.HandleFunc("/monitor/alert/list", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{"code": 0, "message": "ok", "data": nil})
+	})
+
+	mux.HandleFunc("/api/no/config/ietf-l3vpn-ntw:l3vpn-ntw/page", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{
+			"page_num": 1, "page_size": 100, "total_elements": 0, "total_pages": 1,
+			"content": []map[string]any{},
+		})
+	})
+
+	mux.HandleFunc("/api/no/config/ietf-l2vpn-svc:l2vpn-svc/page", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{
+			"page_num": 1, "page_size": 100, "total_elements": 0, "total_pages": 1,
+			"content": []map[string]any{},
+		})
+	})
+
+	mux.HandleFunc("/api/sr/config/terra-te-svc:te-policy-instance/all", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode([]map[string]any{})
+	})
+
+	mux.HandleFunc("/restconf/operations/oper-rpc:isis-neighbor", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{
+			"output": map[string]any{
+				"isis-neighbor-result": "System ID: E2E-PEER\nInterface: GE0/0/1     Circuit Id:  001\nState: Up     HoldTime: 25s        Type: L2           PRI: --\nArea address(es): 49.0001\n",
+			},
+		})
+	})
+
+	mux.HandleFunc("/restconf/operations/oper-rpc:bgp-peer-config", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{
+			"output": map[string]any{
+				"current-config-result": " BGP local router ID: 10.0.0.1\n Local AS number: 65000\n Peer                    AS  MsgRcvd  MsgSent OutQ  PrefRcv Up/Down  State\n 10.0.0.2              65000      100       90    0       10 100h20m Established\n",
+			},
+		})
+	})
+
+	return httptest.NewServer(mux)
 }

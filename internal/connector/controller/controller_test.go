@@ -3,9 +3,11 @@ package controller
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"gitlab.com/pml/network-digital-twin/internal/connector"
 	"github.com/stretchr/testify/assert"
@@ -482,4 +484,312 @@ func TestEncryptPasswordInvalidKeyLength(t *testing.T) {
 	_, err := encryptPassword("short", "password")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "24 bytes")
+}
+
+// ──────────────────────────────
+// 错误路径测试 (TC-C15/C16/C17)
+// ──────────────────────────────
+
+// TestCollect_AuthError TC-C15: Token 接口返回 401，Collect 应返回含 401 的错误。
+func TestCollect_AuthError(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/oauth/token", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(map[string]any{"error": "invalid credentials"})
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	client := connector.NewHTTPClient(
+		connector.WithBaseURL(server.URL),
+		connector.WithAuth(connector.AuthConfig{Type: "bearer", Token: "bad-token"}),
+	)
+	cfg := map[string]any{
+		"base_url":  server.URL,
+		"token_url": "/oauth/token",
+		"username":  "bad-user",
+		"password":  "bad-pass",
+		"device_id": "bad-device",
+	}
+	c := NewControllerConnector("test-auth-err", client, []string{"Device"}, cfg)
+
+	_, err := c.Collect(context.Background(), "Device")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "401")
+}
+
+// TestCollect_ServerError TC-C16: Device API 返回 500，Collect 应返回含 500 的错误。
+func TestCollect_ServerError(t *testing.T) {
+	mux := http.NewServeMux()
+	// Token 正常
+	mux.HandleFunc("/oauth/token", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{"access_token": "tok", "expires_in": 3600})
+	})
+	// Device API 返回 500
+	mux.HandleFunc("/api/no/config/terra-pe:peInfos/peInfos", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	c := newTestConnector(t, server.URL)
+	_, err := c.Collect(context.Background(), "Device")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "500")
+}
+
+// TestCollect_Timeout TC-C17: 使用短超时 context，应返回超时错误。
+func TestCollect_Timeout(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/oauth/token", func(w http.ResponseWriter, r *http.Request) {
+		// 模拟慢响应
+		time.Sleep(2 * time.Second)
+		json.NewEncoder(w).Encode(map[string]any{"access_token": "tok", "expires_in": 3600})
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	c := newTestConnector(t, server.URL)
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	_, err := c.Collect(ctx, "Device")
+	require.Error(t, err)
+	// 超时错误可能是 context.DeadlineExceeded 或 connection refused (server 关闭后)
+}
+
+// TestPing_Unreachable: server 不可达时 Ping 应返回错误。
+func TestPing_Unreachable(t *testing.T) {
+	client := connector.NewHTTPClient(
+		connector.WithBaseURL("http://127.0.0.1:1"), // 不可达端口
+		connector.WithAuth(connector.AuthConfig{Type: "bearer", Token: "tok"}),
+	)
+	cfg := map[string]any{
+		"base_url":  "http://127.0.0.1:1",
+		"token_url": "/oauth/token",
+		"username":  "u",
+		"password":  "p",
+		"device_id": "d",
+	}
+	c := NewControllerConnector("test-unreachable", client, []string{"Device"}, cfg)
+
+	err := c.Ping(context.Background())
+	require.Error(t, err)
+}
+
+// ──────────────────────────────
+// 边界条件测试
+// ──────────────────────────────
+
+// TestCollect_EmptyDevices: Device API 返回空列表，应返回 0 条 resource，无错误。
+func TestCollect_EmptyDevices(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/oauth/token", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{"access_token": "tok", "expires_in": 3600})
+	})
+	mux.HandleFunc("/api/no/config/terra-pe:peInfos/peInfos", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{"peInfo": []map[string]any{}})
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	c := newTestConnector(t, server.URL)
+	resources, err := c.Collect(context.Background(), "Device")
+	require.NoError(t, err)
+	assert.Len(t, resources, 0)
+}
+
+// TestCollect_EmptyAlarms: Alarm data 为 null，应返回 0 条 resource。
+func TestCollect_EmptyAlarms(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/oauth/token", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{"access_token": "tok", "expires_in": 3600})
+	})
+	mux.HandleFunc("/monitor/alert/list", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{"code": 0, "message": "ok", "data": nil})
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	c := newTestConnector(t, server.URL)
+	resources, err := c.Collect(context.Background(), "Alarm")
+	require.NoError(t, err)
+	assert.Len(t, resources, 0)
+}
+
+// TestCollect_MissingFields: Device 响应缺少关键字段，不应 panic，缺失字段跳过。
+func TestCollect_MissingFields(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/oauth/token", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{"access_token": "tok", "expires_in": 3600})
+	})
+	mux.HandleFunc("/api/no/config/terra-pe:peInfos/peInfos", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{
+			"peInfo": []map[string]any{
+				{"id": "dev-minimal"}, // 缺少 name/vendor/product-name 等
+			},
+		})
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	c := newTestConnector(t, server.URL)
+	resources, err := c.Collect(context.Background(), "Device")
+	require.NoError(t, err)
+	require.Len(t, resources, 1)
+	assert.Equal(t, "dev-minimal", resources[0].ID)
+	// 缺失字段不应存在
+	_, hasHostname := resources[0].Properties["hostname"]
+	assert.False(t, hasHostname)
+}
+
+// TestCollectVPN_MultiPage: VPN 分页多页遍历。
+func TestCollectVPN_MultiPage(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/oauth/token", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{"access_token": "tok", "expires_in": 3600})
+	})
+	var reqCount int
+	mux.HandleFunc("/api/no/config/ietf-l3vpn-ntw:l3vpn-ntw/page", func(w http.ResponseWriter, r *http.Request) {
+		reqCount++
+		json.NewEncoder(w).Encode(map[string]any{
+			"page_num": reqCount, "page_size": 1, "total_elements": 2, "total_pages": 2,
+			"content": []map[string]any{
+				{
+					"vpn-services": map[string]any{
+						"vpn-service": []any{
+							map[string]any{"vpn-id": fmt.Sprintf("vpn-%d", reqCount), "svc-name": fmt.Sprintf("VPN-%d", reqCount)},
+						},
+					},
+				},
+			},
+		})
+	})
+	mux.HandleFunc("/api/no/config/ietf-l2vpn-svc:l2vpn-svc/page", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{
+			"page_num": 1, "page_size": 100, "total_elements": 0, "total_pages": 1,
+			"content":   []map[string]any{},
+		})
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	c := newTestConnector(t, server.URL)
+	resources, err := c.Collect(context.Background(), "VPN")
+	require.NoError(t, err)
+	assert.Len(t, resources, 2) // 2 页 * 1 条 = 2 条 L3VPN
+	assert.Equal(t, "vpn-1", resources[0].Properties["vpn_id"])
+	assert.Equal(t, "vpn-2", resources[1].Properties["vpn_id"])
+}
+
+// TestCollectISIS_DeviceFailure: 部分设备 ISIS 失败，其他设备继续采集。
+func TestCollectISIS_DeviceFailure(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/oauth/token", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{"access_token": "tok", "expires_in": 3600})
+	})
+	mux.HandleFunc("/api/no/config/terra-pe:peInfos/peInfos", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{
+			"peInfo": []map[string]any{
+				{"id": "d1", "name": "DEV-OK", "vendor-id": "H3C"},
+				{"id": "d2", "name": "DEV-FAIL", "vendor-id": "H3C"},
+			},
+		})
+	})
+	// ISIS 接口：DEV-OK 返回正常，DEV-FAIL 返回 500
+	mux.HandleFunc("/restconf/operations/oper-rpc:isis-neighbor", func(w http.ResponseWriter, r *http.Request) {
+		var reqBody map[string]any
+		json.NewDecoder(r.Body).Decode(&reqBody)
+		input, _ := reqBody["input"].(map[string]any)
+		peName, _ := input["pe-name"].(string)
+
+		if peName == "DEV-FAIL" {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]any{
+			"output": map[string]any{
+				"isis-neighbor-result": "System ID: PEER1\nInterface: eth0     Circuit Id:  001\nState: Up     HoldTime: 25s        Type: L2           PRI: --\nArea address(es): 49.0001\n",
+			},
+		})
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	c := newTestConnector(t, server.URL)
+	resources, err := c.Collect(context.Background(), "ISIS")
+	require.NoError(t, err) // 整体不应返回错误，只跳过失败设备
+	assert.Len(t, resources, 1) // 只有 DEV-OK 的 1 个邻居
+}
+
+// TestCollectBGP_DeviceFailure: 部分设备 BGP 失败，其他设备继续采集。
+func TestCollectBGP_DeviceFailure(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/oauth/token", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{"access_token": "tok", "expires_in": 3600})
+	})
+	mux.HandleFunc("/api/no/config/terra-pe:peInfos/peInfos", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{
+			"peInfo": []map[string]any{
+				{"id": "d1", "name": "DEV-OK", "vendor-id": "H3C"},
+				{"id": "d2", "name": "DEV-FAIL", "vendor-id": "H3C"},
+			},
+		})
+	})
+	mux.HandleFunc("/restconf/operations/oper-rpc:bgp-peer-config", func(w http.ResponseWriter, r *http.Request) {
+		var reqBody map[string]any
+		json.NewDecoder(r.Body).Decode(&reqBody)
+		input, _ := reqBody["input"].(map[string]any)
+		peName, _ := input["pe-name"].(string)
+
+		if peName == "DEV-FAIL" {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]any{
+			"output": map[string]any{
+				"current-config-result": " BGP local router ID: 10.0.0.1\n Local AS number: 65000\n Peer                    AS  MsgRcvd  MsgSent OutQ  PrefRcv Up/Down  State\n 10.0.0.2              65000      100       90    0       10 100h20m Established\n",
+			},
+		})
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	c := newTestConnector(t, server.URL)
+	resources, err := c.Collect(context.Background(), "BGP")
+	require.NoError(t, err)
+	assert.Len(t, resources, 1) // 只有 DEV-OK 的 1 个 peer
+}
+
+// TestTokenAutoRefresh: Token 过期后自动刷新。
+func TestTokenAutoRefresh(t *testing.T) {
+	var tokenCount int
+	mux := http.NewServeMux()
+	mux.HandleFunc("/oauth/token", func(w http.ResponseWriter, r *http.Request) {
+		tokenCount++
+		json.NewEncoder(w).Encode(map[string]any{
+			"access_token": fmt.Sprintf("token-%d", tokenCount),
+			"expires_in":   1, // 1 秒后过期，触发自动刷新
+		})
+	})
+	mux.HandleFunc("/api/no/config/terra-pe:peInfos/peInfos", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{"peInfo": []map[string]any{}})
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	c := newTestConnector(t, server.URL)
+
+	// 第一次调用触发 Token 获取
+	_, err := c.Collect(context.Background(), "Device")
+	require.NoError(t, err)
+	assert.Equal(t, 1, tokenCount)
+
+	// 等待 Token 过期（1s + 60s 缓冲内，但 ensureToken 检查 tokenExp.Add(-60s)，1s 的 token 立刻被认为过期）
+	time.Sleep(100 * time.Millisecond)
+
+	// 第二次调用应触发刷新
+	_, err = c.Collect(context.Background(), "Device")
+	require.NoError(t, err)
+	assert.Equal(t, 2, tokenCount) // Token 被刷新了
 }

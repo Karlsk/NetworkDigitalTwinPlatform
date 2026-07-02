@@ -139,16 +139,17 @@ func TestCreateFromConfig(t *testing.T) {
 
 	f := NewConnectorFactory()
 	f.RegisterBuilder("mock", testBuilder("mock"))
+	f.RegisterBuilder("controller", testBuilder("controller"))
 
 	registry := NewConnectorRegistry()
 	if err := f.CreateFromConfig(configPath, registry); err != nil {
 		t.Fatalf("CreateFromConfig() error = %v", err)
 	}
 
-	// 验证 registry 中有 2 个 connector
+	// 验证 registry 中有 3 个 connector (mock-netbox, mock-cmdb, controller-1)
 	list := registry.List()
-	if len(list) != 2 {
-		t.Fatalf("registry has %d connectors, want 2", len(list))
+	if len(list) != 3 {
+		t.Fatalf("registry has %d connectors, want 3", len(list))
 	}
 
 	// 验证 mock-netbox
@@ -167,6 +168,18 @@ func TestCreateFromConfig(t *testing.T) {
 	}
 	if c2.Metadata().Name != "mock-cmdb" {
 		t.Errorf("c2.Name = %q, want %q", c2.Metadata().Name, "mock-cmdb")
+	}
+
+	// 验证 controller-1
+	c3, err := registry.Get("controller-1")
+	if err != nil {
+		t.Fatalf("Get(controller-1) error = %v", err)
+	}
+	if c3.Metadata().Name != "controller-1" {
+		t.Errorf("c3.Name = %q, want %q", c3.Metadata().Name, "controller-1")
+	}
+	if c3.Metadata().Type != "controller" {
+		t.Errorf("c3.Type = %q, want %q", c3.Metadata().Type, "controller")
 	}
 }
 

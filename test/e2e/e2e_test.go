@@ -6,10 +6,15 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"gitlab.com/pml/network-digital-twin/internal/assembler"
+	"gitlab.com/pml/network-digital-twin/internal/connector"
+	"gitlab.com/pml/network-digital-twin/internal/connector/controller"
+	"gitlab.com/pml/network-digital-twin/internal/connector/mock"
+	"gitlab.com/pml/network-digital-twin/internal/normalizer"
 	"gitlab.com/pml/network-digital-twin/internal/service"
 	"gitlab.com/pml/network-digital-twin/internal/snapshot"
 )
@@ -714,4 +719,101 @@ func TestE2E_ConcurrentProtection(t *testing.T) {
 
 	// === 清理 ===
 	_ = snapMgr.Delete(ctx, "concurrent-snap")
+}
+
+// TestE2E_FullSyncWithRealConnectors 验证 httptest mock Controller + Mock Connector
+// 通过 ConnectorFactory 创建后，FullSync 完整管线写入 Neo4j。
+func TestE2E_FullSyncWithRealConnectors(t *testing.T) {
+	client := newE2EClient(t)
+	reg := loadOntology(t)
+	lock := snapshot.NewGraphLock()
+
+	// 1. 启动 httptest mock server 模拟 Controller API
+	controllerServer := setupE2EControllerServer(t)
+	defer controllerServer.Close()
+
+	// 2. 通过 ConnectorFactory 创建 Connector
+	factory := connector.NewConnectorFactory()
+
+	// 注册 mock builder
+	factory.RegisterBuilder("mock", func(name string, cfg map[string]any, entityTypes []string) (connector.Connector, error) {
+		dataDir, _ := cfg["data_dir"].(string)
+		return mock.NewMockConnector(name, dataDir, entityTypes), nil
+	})
+
+	// 注册 controller builder (使用 mock server URL)
+	controllerClient := connector.NewHTTPClient(
+		connector.WithBaseURL(controllerServer.URL),
+		connector.WithAuth(connector.AuthConfig{Type: "bearer", Token: "mock-token"}),
+	)
+	factory.RegisterBuilder("controller", func(name string, cfg map[string]any, entityTypes []string) (connector.Connector, error) {
+		return controller.NewControllerConnector(name, controllerClient, entityTypes, cfg), nil
+	})
+
+	connReg := connector.NewConnectorRegistry()
+
+	// 创建 mock connector
+	mockConn := mock.NewMockConnector("e2e-mock",
+		filepath.Join("..", "..", "testdata", "mock_netbox"),
+		[]string{"Device", "Interface", "ISIS", "Link", "Network_Slice"})
+	connReg.Register(mockConn)
+
+	// 创建 controller connector (指向 mock server)
+	ctrlCfg := map[string]any{
+		"base_url":  controllerServer.URL,
+		"token_url": "/oauth/token",
+		"username":  "test",
+		"password":  "test",
+		"device_id": "test",
+	}
+	ctrlConn, err := factory.Create(connector.ConnectorConfigEntry{
+		Name:        "e2e-controller",
+		Type:        "controller",
+		Config:      ctrlCfg,
+		EntityTypes: []string{"Device", "Interface", "Link", "Alarm", "VPN", "Tunnel", "ISIS", "BGP"},
+	})
+	if err != nil {
+		t.Fatalf("Create controller connector: %v", err)
+	}
+	connReg.Register(ctrlConn)
+
+	// 3. 创建 SyncService 并执行 FullSync
+	norm := normalizer.NewNormalizer(reg)
+	asm := assembler.NewGraphAssembler(reg)
+	syncSvc := service.NewSyncService(connReg, norm, asm, client, lock, 100)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+
+	// FullSync 内部使用 "default" DB，先备份后恢复
+	backup := backupAndRestoreDefault(t, client)
+	defer backup()
+
+	result, err := syncSvc.FullSync(ctx)
+	if err != nil {
+		t.Fatalf("FullSync() error = %v", err)
+	}
+
+	t.Logf("FullSync result: nodes=%d, rels=%d, orphan=%d",
+		result.NodesCreated, result.RelationsCreated, result.OrphanEdgesSkipped)
+
+	// 4. 验证 Neo4j 中有节点和关系
+	neo4jNodes := countNodes(t, client, "default")
+	neo4jRels := countRels(t, client, "default")
+
+	if neo4jNodes == 0 {
+		t.Error("FullSync created 0 nodes, expected > 0")
+	}
+	t.Logf("Neo4j nodes: %d, relations: %d", neo4jNodes, neo4jRels)
+
+	// 5. 验证 Device 节点存在
+	deviceCount := countNodesByLabel(t, client, "default", "Device")
+	if deviceCount == 0 {
+		t.Error("No Device nodes found after FullSync")
+	}
+	t.Logf("Device nodes: %d", deviceCount)
+
+	// 6. 验证 HAS_INTERFACE 关系存在
+	ifaceRels := countRelsByType(t, client, "default", "HAS_INTERFACE")
+	t.Logf("HAS_INTERFACE relations: %d", ifaceRels)
 }

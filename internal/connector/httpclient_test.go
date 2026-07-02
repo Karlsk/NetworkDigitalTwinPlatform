@@ -769,3 +769,95 @@ func TestHTTPClient_Delete(t *testing.T) {
 		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusNoContent)
 	}
 }
+
+// TC-H24: Bearer Auth 直接值模式
+func TestHTTPClient_BearerAuth_DirectValue(t *testing.T) {
+	var gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c := NewHTTPClient(
+		WithBaseURL(srv.URL),
+		WithAuth(AuthConfig{
+			Type:  "bearer",
+			Token: "my-bearer-token-123",
+		}),
+	)
+
+	resp, err := c.Get(context.Background(), "/api/test")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	defer resp.Body.Close()
+
+	want := "Bearer my-bearer-token-123"
+	if gotAuth != want {
+		t.Errorf("Authorization = %q, want %q", gotAuth, want)
+	}
+}
+
+// TC-H25: Bearer Auth env 兜底（直接值为空时）
+func TestHTTPClient_BearerAuth_EnvFallback(t *testing.T) {
+	t.Setenv("MY_BEARER_TOKEN", "env-bearer-value")
+
+	var gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c := NewHTTPClient(
+		WithBaseURL(srv.URL),
+		WithAuth(AuthConfig{
+			Type:     "bearer",
+			TokenEnv: "MY_BEARER_TOKEN",
+		}),
+	)
+
+	resp, err := c.Get(context.Background(), "/api/test")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	defer resp.Body.Close()
+
+	want := "Bearer env-bearer-value"
+	if gotAuth != want {
+		t.Errorf("Authorization = %q, want %q", gotAuth, want)
+	}
+}
+
+// TC-H26: Bearer Auth 直接值优先于 env
+func TestHTTPClient_BearerAuth_DirectValuePriority(t *testing.T) {
+	t.Setenv("MY_BEARER_PRIORITY", "env-value")
+
+	var gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c := NewHTTPClient(
+		WithBaseURL(srv.URL),
+		WithAuth(AuthConfig{
+			Type:     "bearer",
+			Token:    "direct-bearer-wins",
+			TokenEnv: "MY_BEARER_PRIORITY",
+		}),
+	)
+
+	resp, err := c.Get(context.Background(), "/api/test")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	defer resp.Body.Close()
+
+	want := "Bearer direct-bearer-wins"
+	if gotAuth != want {
+		t.Errorf("Authorization = %q, want %q (direct value should take priority)", gotAuth, want)
+	}
+}

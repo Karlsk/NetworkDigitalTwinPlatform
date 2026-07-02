@@ -12,8 +12,8 @@ func TestLoadConnectorConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadConnectorConfig() error = %v", err)
 	}
-	if len(entries) != 2 {
-		t.Fatalf("LoadConnectorConfig() returned %d entries, want 2", len(entries))
+	if len(entries) != 3 {
+		t.Fatalf("LoadConnectorConfig() returned %d entries, want 3", len(entries))
 	}
 
 	// 验证第一个 entry: mock-netbox
@@ -44,6 +44,21 @@ func TestLoadConnectorConfig(t *testing.T) {
 	}
 	if len(e2.EntityTypes) != 3 {
 		t.Fatalf("entries[1].EntityTypes len = %d, want 3", len(e2.EntityTypes))
+	}
+
+	// 验证第三个 entry: controller-1
+	e3 := entries[2]
+	if e3.Name != "controller-1" {
+		t.Errorf("entries[2].Name = %q, want %q", e3.Name, "controller-1")
+	}
+	if e3.Type != "controller" {
+		t.Errorf("entries[2].Type = %q, want %q", e3.Type, "controller")
+	}
+	if len(e3.EntityTypes) != 8 {
+		t.Errorf("entries[2].EntityTypes len = %d, want 8", len(e3.EntityTypes))
+	}
+	if e3.Auth.Type != "bearer" {
+		t.Errorf("entries[2].Auth.Type = %q, want %q", e3.Auth.Type, "bearer")
 	}
 }
 

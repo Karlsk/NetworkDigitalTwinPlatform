@@ -24,7 +24,9 @@ import (
 	"gitlab.com/pml/network-digital-twin/internal/assembler"
 	"gitlab.com/pml/network-digital-twin/internal/config"
 	"gitlab.com/pml/network-digital-twin/internal/connector"
+	"gitlab.com/pml/network-digital-twin/internal/connector/controller"
 	"gitlab.com/pml/network-digital-twin/internal/connector/mock"
+	"gitlab.com/pml/network-digital-twin/internal/connector/netbox"
 	"gitlab.com/pml/network-digital-twin/internal/graph"
 	"gitlab.com/pml/network-digital-twin/internal/normalizer"
 	"gitlab.com/pml/network-digital-twin/internal/schema"
@@ -112,7 +114,7 @@ func main() {
 	// ================================================================
 	section("Step 2: 创建 (_db, uri) 复合索引")
 
-	labels := []string{"Device", "Interface", "ISIS", "Link", "Network_Slice", "Alarm"}
+	labels := []string{"Device", "Interface", "ISIS", "Link", "Network_Slice", "Alarm", "VPN", "BGP", "Tunnel"}
 	if err := client.EnsureIndexes(ctx, labels); err != nil {
 		log.Fatalf("创建索引失败: %v", err)
 	}
@@ -141,37 +143,63 @@ func main() {
 		fmt.Printf("    - %s (%v -> %v)\n",
 			rt.Metadata.Name, rt.Spec.Source, rt.Spec.Target)
 	}
-	checkpoint("Schema 加载完整", len(entityTypes) == 6 && len(relationTypes) == 5)
+	checkpoint("Schema 加载完整", len(entityTypes) == 9 && len(relationTypes) == 7)
 
 	// ================================================================
-	// Step 4: Mock Connector 采集
+	// Step 4: ConnectorFactory 数据采集 (配置驱动)
 	// ================================================================
-	section("Step 4: Mock Connector 数据采集")
-
-	dataDir := filepath.Join("testdata", "mock_netbox")
-	conn := mock.NewMockConnector("mock-netbox", dataDir,
-		[]string{"Device", "Interface", "ISIS", "Link", "Network_Slice"})
+	section("Step 4: ConnectorFactory 数据采集 (配置驱动)")
 
 	connReg := connector.NewConnectorRegistry()
-	connReg.Register(conn)
+	factory := connector.NewConnectorFactory()
+
+	// 注册内置 builder
+	factory.RegisterBuilder("mock", func(name string, cfg map[string]any, entityTypes []string) (connector.Connector, error) {
+		dataDir, _ := cfg["data_dir"].(string)
+		return mock.NewMockConnector(name, dataDir, entityTypes), nil
+	})
+	factory.RegisterBuilder("netbox", netbox.Builder())
+	factory.RegisterBuilder("controller", controller.Builder())
+
+	// 从 connectors.yaml 配置批量创建
+	configPath := filepath.Join("configs", "connectors.yaml")
+	if err := factory.CreateFromConfig(configPath, connReg); err != nil {
+		fmt.Printf("  [警告] ConnectorFactory 创建失败: %v\n", err)
+		fmt.Println("  回退: 仅使用 Mock Connector")
+		// 回退: 仅注册 Mock Connector
+		dataDir := filepath.Join("testdata", "mock_netbox")
+		conn := mock.NewMockConnector("mock-netbox", dataDir,
+			[]string{"Device", "Interface", "ISIS", "Link", "Network_Slice"})
+		connReg.Register(conn)
+	}
+
+	fmt.Printf("  已注册 Connector 数量: %d\n", len(connReg.List()))
+	for _, meta := range connReg.List() {
+		fmt.Printf("    - %s (type=%s, entities=%v)\n", meta.Name, meta.Type, meta.EntityTypes)
+	}
 
 	var allResources []connector.Resource
 	totalRaw := 0
 
-	for _, et := range conn.Metadata().EntityTypes {
-		resources, err := conn.Collect(ctx, et)
-		if err != nil {
-			fmt.Printf("  [跳过] %s: %v\n", et, err)
+	for _, meta := range connReg.List() {
+		c, _ := connReg.Get(meta.Name)
+		if c == nil {
 			continue
 		}
-		totalRaw += len(resources)
-		allResources = append(allResources, resources...)
+		for _, et := range meta.EntityTypes {
+			resources, err := c.Collect(ctx, et)
+			if err != nil {
+				fmt.Printf("  [跳过] %s/%s: %v\n", meta.Name, et, err)
+				continue
+			}
+			totalRaw += len(resources)
+			allResources = append(allResources, resources...)
 
-		fmt.Printf("  %s: %d 条\n", et, len(resources))
-		// 打印第 1 条原始数据作为示例
-		if len(resources) > 0 {
-			fmt.Printf("    示例 (ID=%s): ", resources[0].ID)
-			printJSON("    ", propsPreview(resources[0].Properties))
+			fmt.Printf("  %s/%s: %d 条\n", meta.Name, et, len(resources))
+			if len(resources) > 0 {
+				fmt.Printf("    示例 (ID=%s): ", resources[0].ID)
+				printJSON("    ", propsPreview(resources[0].Properties))
+			}
 		}
 	}
 	fmt.Printf("\n  采集总计: %d 条原始 Resource\n", totalRaw)
@@ -319,7 +347,7 @@ func main() {
 
 	// 按 RelType 统计
 	fmt.Println("  按 Type 查询关系:")
-	for _, relType := range []string{"HAS_INTERFACE", "CONNECTS_TO", "RUNS_ON", "ENDPOINT"} {
+	for _, relType := range []string{"HAS_INTERFACE", "CONNECTS_TO", "RUNS_ON", "ENDPOINT", "HAS_ALARM", "HAS_VPN", "HAS_BGP_PEER", "HAS_ISIS_PEER", "TUNNEL_FOR"} {
 		rows, err := client.Query(ctx, "default",
 			fmt.Sprintf("MATCH (a)-[r:%s]->(b) WHERE a._db = $_db RETURN count(r) AS cnt", relType), nil)
 		if err != nil {
