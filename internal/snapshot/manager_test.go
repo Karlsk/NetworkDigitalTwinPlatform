@@ -946,6 +946,101 @@ func TestCompareProps_EmptyMaps(t *testing.T) {
 	}
 }
 
+// TestCompareProps_DetailedScenarios 覆盖 V1-14 规范要求的 7 个 compareProps 细分场景。
+func TestCompareProps_DetailedScenarios(t *testing.T) {
+	t.Run("a_empty_b_has_values_all_added", func(t *testing.T) {
+		a := map[string]any{}
+		b := map[string]any{"hostname": "r1", "status": "up"}
+		added, removed, modified := compareProps(a, b)
+		if len(added) != 2 {
+			t.Errorf("added len = %d, want 2", len(added))
+		}
+		if len(removed) != 0 {
+			t.Errorf("removed len = %d, want 0", len(removed))
+		}
+		if len(modified) != 0 {
+			t.Errorf("modified len = %d, want 0", len(modified))
+		}
+	})
+
+	t.Run("a_has_values_b_empty_all_removed", func(t *testing.T) {
+		a := map[string]any{"hostname": "r1", "status": "up"}
+		b := map[string]any{}
+		added, removed, modified := compareProps(a, b)
+		if len(added) != 0 {
+			t.Errorf("added len = %d, want 0", len(added))
+		}
+		if len(removed) != 2 {
+			t.Errorf("removed len = %d, want 2", len(removed))
+		}
+		if len(modified) != 0 {
+			t.Errorf("modified len = %d, want 0", len(modified))
+		}
+	})
+
+	t.Run("int42_vs_float42_equal_not_modified", func(t *testing.T) {
+		a := map[string]any{"count": int(42)}
+		b := map[string]any{"count": float64(42.0)}
+		added, removed, modified := compareProps(a, b)
+		if len(added) != 0 || len(removed) != 0 || len(modified) != 0 {
+			t.Errorf("int(42) vs float64(42.0) should be equal: added=%d, removed=%d, modified=%d",
+				len(added), len(removed), len(modified))
+		}
+	})
+
+	t.Run("int42_vs_float43_modified", func(t *testing.T) {
+		a := map[string]any{"count": int(42)}
+		b := map[string]any{"count": float64(43.0)}
+		_, _, modified := compareProps(a, b)
+		if len(modified) != 1 {
+			t.Fatalf("modified len = %d, want 1", len(modified))
+		}
+		fc, ok := modified["count"]
+		if !ok {
+			t.Fatal("modified[count] not found")
+		}
+		if fc.OldValue != int(42) {
+			t.Errorf("OldValue = %v, want 42", fc.OldValue)
+		}
+		if fc.NewValue != float64(43.0) {
+			t.Errorf("NewValue = %v, want 43.0", fc.NewValue)
+		}
+	})
+
+	t.Run("string_up_vs_down_modified", func(t *testing.T) {
+		a := map[string]any{"status": "up"}
+		b := map[string]any{"status": "down"}
+		_, _, modified := compareProps(a, b)
+		if len(modified) != 1 {
+			t.Fatalf("modified len = %d, want 1", len(modified))
+		}
+		fc := modified["status"]
+		if fc.OldValue != "up" || fc.NewValue != "down" {
+			t.Errorf("status FieldChange = {%v, %v}, want {up, down}", fc.OldValue, fc.NewValue)
+		}
+	})
+
+	t.Run("bool_true_vs_true_equal", func(t *testing.T) {
+		a := map[string]any{"enabled": true}
+		b := map[string]any{"enabled": true}
+		added, removed, modified := compareProps(a, b)
+		if len(added) != 0 || len(removed) != 0 || len(modified) != 0 {
+			t.Errorf("bool(true) vs bool(true) should be equal: added=%d, removed=%d, modified=%d",
+				len(added), len(removed), len(modified))
+		}
+	})
+
+	t.Run("both_empty_maps", func(t *testing.T) {
+		a := map[string]any{}
+		b := map[string]any{}
+		added, removed, modified := compareProps(a, b)
+		if len(added) != 0 || len(removed) != 0 || len(modified) != 0 {
+			t.Errorf("empty maps should produce no changes: added=%d, removed=%d, modified=%d",
+				len(added), len(removed), len(modified))
+		}
+	})
+}
+
 // TestValuesEqual_NumericNormalization int(42) vs float64(42.0) 相等。
 func TestValuesEqual_NumericNormalization(t *testing.T) {
 	if !valuesEqual(int(42), float64(42.0)) {
@@ -1527,5 +1622,224 @@ func TestDiff_QueryCount(t *testing.T) {
 
 	if len(gdb.queryCalls) != 6 {
 		t.Errorf("Query calls = %d, want 6", len(gdb.queryCalls))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// V1-14: Diff 测试补全
+// ---------------------------------------------------------------------------
+
+// TestLocalDiff_MultiNodeChange TC-D05: 多节点同时变更。
+// snap-a 有 3 个节点，snap-b 中 device:001 新增属性，device:002 修改属性，device:003 不变。
+// 预期 ChangedNodes 有 2 条（device:001 和 device:002）。
+func TestLocalDiff_MultiNodeChange(t *testing.T) {
+	snapDir := t.TempDir()
+	writeTestSnapshot(t, snapDir, "snap-a",
+		[]yamlNodeItem{
+			{Labels: []string{"Device"}, URI: "device:001", Props: map[string]any{"hostname": "r1"}},
+			{Labels: []string{"Device"}, URI: "device:002", Props: map[string]any{"hostname": "r2"}},
+			{Labels: []string{"Device"}, URI: "device:003", Props: map[string]any{"hostname": "r3"}},
+		},
+		nil,
+	)
+	writeTestSnapshot(t, snapDir, "snap-b",
+		[]yamlNodeItem{
+			{Labels: []string{"Device"}, URI: "device:001", Props: map[string]any{"hostname": "r1", "status": "up"}},
+			{Labels: []string{"Device"}, URI: "device:002", Props: map[string]any{"hostname": "r2-modified"}},
+			{Labels: []string{"Device"}, URI: "device:003", Props: map[string]any{"hostname": "r3"}},
+		},
+		nil,
+	)
+
+	gdb := &mockGraphDB{}
+	mgr := NewSnapshotManager(gdb, NewGraphLock(), snapDir, 5)
+
+	diff, err := mgr.LocalDiff("snap-a", "snap-b")
+	if err != nil {
+		t.Fatalf("LocalDiff() error = %v", err)
+	}
+
+	if len(diff.ChangedNodes) != 2 {
+		t.Fatalf("ChangedNodes = %d, want 2", len(diff.ChangedNodes))
+	}
+
+	// 按 URI 建立索引方便查找
+	changeMap := make(map[string]NodeChange, len(diff.ChangedNodes))
+	for _, nc := range diff.ChangedNodes {
+		changeMap[nc.URI] = nc
+	}
+
+	// device:001: hostname 相同，新增 status → AddedFields
+	nc001, ok := changeMap["device:001"]
+	if !ok {
+		t.Fatal("device:001 not in ChangedNodes")
+	}
+	if len(nc001.AddedFields) != 1 || nc001.AddedFields["status"] != "up" {
+		t.Errorf("device:001 AddedFields = %v, want {status: up}", nc001.AddedFields)
+	}
+	if len(nc001.ModifiedFields) != 0 {
+		t.Errorf("device:001 ModifiedFields should be empty, got %v", nc001.ModifiedFields)
+	}
+
+	// device:002: hostname 修改 → ModifiedFields
+	nc002, ok := changeMap["device:002"]
+	if !ok {
+		t.Fatal("device:002 not in ChangedNodes")
+	}
+	if len(nc002.ModifiedFields) != 1 {
+		t.Fatalf("device:002 ModifiedFields len = %d, want 1", len(nc002.ModifiedFields))
+	}
+	fc, ok := nc002.ModifiedFields["hostname"]
+	if !ok {
+		t.Fatal("device:002 ModifiedFields[hostname] not found")
+	}
+	if fc.OldValue != "r2" || fc.NewValue != "r2-modified" {
+		t.Errorf("hostname FieldChange = {%v, %v}, want {r2, r2-modified}", fc.OldValue, fc.NewValue)
+	}
+
+	// device:003 不应出现在 ChangedNodes 中
+	if _, ok := changeMap["device:003"]; ok {
+		t.Error("device:003 should not be in ChangedNodes (no change)")
+	}
+}
+
+// TestDiff_LocalDiffConsistency TC-D08: Cypher Diff 和 LocalDiff 对相同数据产出一致结果。
+// 构造两个快照，同时用 LocalDiff 和 Cypher Diff（mock）对比，验证 ChangedNodes/ChangedRels 一致。
+func TestDiff_LocalDiffConsistency(t *testing.T) {
+	snapDir := t.TempDir()
+
+	// 构造 YAML 快照：节点属性变更 + 关系属性变更
+	nodesA := []yamlNodeItem{
+		{Labels: []string{"Resource", "Device"}, URI: "device:001", Props: map[string]any{"hostname": "r1", "status": "up"}},
+		{Labels: []string{"Device"}, URI: "device:002", Props: map[string]any{"hostname": "r2"}},
+	}
+	relsA := []yamlRelItem{
+		{Type: "CONNECTS", From: "device:001", To: "device:002", Props: map[string]any{"bandwidth": 100}},
+	}
+	nodesB := []yamlNodeItem{
+		{Labels: []string{"Resource", "Device"}, URI: "device:001", Props: map[string]any{"hostname": "r1", "status": "down"}},
+		{Labels: []string{"Device"}, URI: "device:002", Props: map[string]any{"hostname": "r2"}},
+	}
+	relsB := []yamlRelItem{
+		{Type: "CONNECTS", From: "device:001", To: "device:002", Props: map[string]any{"bandwidth": 200}},
+	}
+	writeTestSnapshot(t, snapDir, "snap-a", nodesA, relsA)
+	writeTestSnapshot(t, snapDir, "snap-b", nodesB, relsB)
+
+	// === 1. LocalDiff ===
+	gdbLocal := &mockGraphDB{}
+	mgrLocal := NewSnapshotManager(gdbLocal, NewGraphLock(), snapDir, 5)
+	localDiff, err := mgrLocal.LocalDiff("snap-a", "snap-b")
+	if err != nil {
+		t.Fatalf("LocalDiff() error = %v", err)
+	}
+
+	// === 2. Cypher Diff (mock) ===
+	// 配置 6 次 Query 返回，模拟与 YAML 数据一致的结果
+	gdbCypher := &mockGraphDB{
+		hasDBResult: map[string]bool{"snap-a": false, "snap-b": false},
+		queryResultsSeq: [][]map[string]any{
+			nil, // Query 1: added nodes → 空
+			nil, // Query 2: removed nodes → 空
+			nil, // Query 3: added rels → 空
+			nil, // Query 4: removed rels → 空
+			// Query 5: changed nodes → device:001 status 从 up 变为 down
+			{
+				{
+					"uri":    "device:001",
+					"labels": []any{"Resource", "Device"},
+					"aProps": map[string]any{"hostname": "r1", "status": "up"},
+					"bProps": map[string]any{"hostname": "r1", "status": "down"},
+				},
+			},
+			// Query 6: changed rels → CONNECTS bandwidth 从 100 变为 200
+			{
+				{
+					"type":   "CONNECTS",
+					"from":   "device:001",
+					"to":     "device:002",
+					"aProps": map[string]any{"bandwidth": 100},
+					"bProps": map[string]any{"bandwidth": 200},
+				},
+			},
+		},
+	}
+	mgrCypher := NewSnapshotManager(gdbCypher, NewGraphLock(), snapDir, 5)
+	cypherDiff, err := mgrCypher.Diff(context.Background(), "snap-a", "snap-b")
+	if err != nil {
+		t.Fatalf("Diff() error = %v", err)
+	}
+
+	// === 3. 验证 ChangedNodes 一致性 ===
+	if len(localDiff.ChangedNodes) != len(cypherDiff.ChangedNodes) {
+		t.Fatalf("ChangedNodes count mismatch: local=%d, cypher=%d",
+			len(localDiff.ChangedNodes), len(cypherDiff.ChangedNodes))
+	}
+
+	// 建立 URI → NodeChange 映射对比
+	localNodeMap := make(map[string]NodeChange)
+	for _, nc := range localDiff.ChangedNodes {
+		localNodeMap[nc.URI] = nc
+	}
+	cypherNodeMap := make(map[string]NodeChange)
+	for _, nc := range cypherDiff.ChangedNodes {
+		cypherNodeMap[nc.URI] = nc
+	}
+
+	for uri, localNC := range localNodeMap {
+		cypherNC, ok := cypherNodeMap[uri]
+		if !ok {
+			t.Errorf("URI %q in localDiff but not in cypherDiff", uri)
+			continue
+		}
+		if localNC.Label != cypherNC.Label {
+			t.Errorf("URI %q Label mismatch: local=%q, cypher=%q", uri, localNC.Label, cypherNC.Label)
+		}
+		if len(localNC.ModifiedFields) != len(cypherNC.ModifiedFields) {
+			t.Errorf("URI %q ModifiedFields count mismatch: local=%d, cypher=%d",
+				uri, len(localNC.ModifiedFields), len(cypherNC.ModifiedFields))
+		}
+		// 验证 ModifiedFields 的 key 集合一致
+		for k := range localNC.ModifiedFields {
+			if _, ok := cypherNC.ModifiedFields[k]; !ok {
+				t.Errorf("URI %q ModifiedFields key %q missing in cypher result", uri, k)
+			}
+		}
+	}
+
+	// === 4. 验证 ChangedRels 一致性 ===
+	if len(localDiff.ChangedRels) != len(cypherDiff.ChangedRels) {
+		t.Fatalf("ChangedRels count mismatch: local=%d, cypher=%d",
+			len(localDiff.ChangedRels), len(cypherDiff.ChangedRels))
+	}
+
+	// 建立 From→To→Type → RelChange 映射对比
+	relKey := func(rc RelChange) string {
+		return rc.From + "->" + rc.To + ":" + rc.Type
+	}
+	localRelMap := make(map[string]RelChange)
+	for _, rc := range localDiff.ChangedRels {
+		localRelMap[relKey(rc)] = rc
+	}
+	cypherRelMap := make(map[string]RelChange)
+	for _, rc := range cypherDiff.ChangedRels {
+		cypherRelMap[relKey(rc)] = rc
+	}
+
+	for key, localRC := range localRelMap {
+		cypherRC, ok := cypherRelMap[key]
+		if !ok {
+			t.Errorf("Rel %q in localDiff but not in cypherDiff", key)
+			continue
+		}
+		if len(localRC.ModifiedFields) != len(cypherRC.ModifiedFields) {
+			t.Errorf("Rel %q ModifiedFields count mismatch: local=%d, cypher=%d",
+				key, len(localRC.ModifiedFields), len(cypherRC.ModifiedFields))
+		}
+		for k := range localRC.ModifiedFields {
+			if _, ok := cypherRC.ModifiedFields[k]; !ok {
+				t.Errorf("Rel %q ModifiedFields key %q missing in cypher result", key, k)
+			}
+		}
 	}
 }

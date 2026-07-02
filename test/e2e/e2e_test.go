@@ -817,3 +817,91 @@ func TestE2E_FullSyncWithRealConnectors(t *testing.T) {
 	ifaceRels := countRelsByType(t, client, "default", "HAS_INTERFACE")
 	t.Logf("HAS_INTERFACE relations: %d", ifaceRels)
 }
+
+// TestE2E_DiffPropertyChange 验证属性级变更检测（LocalDiff + Cypher Diff 一致性）。
+// 创建快照 A → 修改节点属性 → 创建快照 B → 对比两种 Diff 方式的 ChangedNodes。
+func TestE2E_DiffPropertyChange(t *testing.T) {
+	client := newE2EClient(t)
+	lock := snapshot.NewGraphLock()
+	syncSvc := newE2ESyncService(t, client, lock)
+	snapMgr := newE2ESnapshotManager(t, client, lock)
+	defer backupAndRestoreDefault(t, client)()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+
+	// 清理前次遗留
+	_ = snapMgr.Delete(ctx, "snap-diff-a")
+	_ = snapMgr.Delete(ctx, "snap-diff-b")
+
+	// === Step 1: FullSync 导入基线数据 ===
+	if _, err := syncSvc.FullSync(ctx); err != nil {
+		t.Fatalf("FullSync error = %v", err)
+	}
+
+	// === Step 2: Create snap-A ===
+	if _, err := snapMgr.Create(ctx, "snap-diff-a"); err != nil {
+		t.Fatalf("Create(snap-diff-a) error = %v", err)
+	}
+
+	// === Step 3: Upsert 修改 device:SN12345 的 hostname 属性 ===
+	updatedNode := []assembler.Node{
+		{Labels: []string{"Device"}, URI: "device:SN12345", Props: map[string]any{
+			"serial_number": "SN12345", "hostname": "Modified-Router-Core-01",
+			"vendor": "H3C", "hw_model": "CR16000", "status": "Down",
+		}},
+	}
+	if err := client.Upsert(ctx, "default", updatedNode, nil); err != nil {
+		t.Fatalf("Upsert error = %v", err)
+	}
+
+	// === Step 4: Create snap-B ===
+	if _, err := snapMgr.Create(ctx, "snap-diff-b"); err != nil {
+		t.Fatalf("Create(snap-diff-b) error = %v", err)
+	}
+
+	// === Step 5: LocalDiff → 验证 ChangedNodes 非空 ===
+	localDiff, err := snapMgr.LocalDiff("snap-diff-a", "snap-diff-b")
+	if err != nil {
+		t.Fatalf("LocalDiff error = %v", err)
+	}
+	if len(localDiff.ChangedNodes) == 0 {
+		t.Error("LocalDiff.ChangedNodes is empty, expected at least 1")
+	} else {
+		t.Logf("LocalDiff.ChangedNodes count = %d", len(localDiff.ChangedNodes))
+		for i, nc := range localDiff.ChangedNodes {
+			t.Logf("  [%d] URI=%s Label=%s modified=%d", i, nc.URI, nc.Label, len(nc.ModifiedFields))
+		}
+	}
+
+	// 收集 LocalDiff ChangedNodes URI 集合
+	localURIs := make(map[string]bool)
+	for _, nc := range localDiff.ChangedNodes {
+		localURIs[nc.URI] = true
+	}
+
+	// === Step 6: Cypher Diff → 验证 ChangedNodes 非空 ===
+	cypherDiff, err := snapMgr.Diff(ctx, "snap-diff-a", "snap-diff-b")
+	if err != nil {
+		t.Fatalf("Diff error = %v", err)
+	}
+	if len(cypherDiff.ChangedNodes) == 0 {
+		t.Error("Cypher Diff.ChangedNodes is empty, expected at least 1")
+	} else {
+		t.Logf("Cypher Diff.ChangedNodes count = %d", len(cypherDiff.ChangedNodes))
+		for i, nc := range cypherDiff.ChangedNodes {
+			t.Logf("  [%d] URI=%s Label=%s modified=%d", i, nc.URI, nc.Label, len(nc.ModifiedFields))
+		}
+	}
+
+	// === Step 7: 对比两种 Diff 的 ChangedNodes URI 集合一致 ===
+	for _, nc := range cypherDiff.ChangedNodes {
+		if !localURIs[nc.URI] {
+			t.Errorf("URI %q in Cypher Diff but not in LocalDiff ChangedNodes", nc.URI)
+		}
+	}
+
+	// === 清理 ===
+	_ = snapMgr.Delete(ctx, "snap-diff-a")
+	_ = snapMgr.Delete(ctx, "snap-diff-b")
+}
