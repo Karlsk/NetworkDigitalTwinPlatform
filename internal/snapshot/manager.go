@@ -439,6 +439,41 @@ func (sm *SnapshotManager) LocalDiff(a, b string) (*SnapshotDiff, error) {
 		}
 	}
 
+	// === 属性级对比: 节点 ===
+	// 对 URI 交集中的节点调用 compareProps，填充 ChangedNodes。
+	for uri, bNode := range bNodeURIs {
+		if aNode, ok := aNodeURIs[uri]; ok {
+			added, removed, modified := compareProps(aNode.Props, bNode.Props)
+			if len(added) > 0 || len(removed) > 0 || len(modified) > 0 {
+				diff.ChangedNodes = append(diff.ChangedNodes, NodeChange{
+					URI:            uri,
+					Label:          bNode.MostSpecificLabel(),
+					AddedFields:    added,
+					RemovedFields:  removed,
+					ModifiedFields: modified,
+				})
+			}
+		}
+	}
+
+	// === 属性级对比: 关系 ===
+	// 对 type+from+to 交集中的关系调用 compareProps，填充 ChangedRels。
+	for key, bRel := range bRelKeys {
+		if aRel, ok := aRelKeys[key]; ok {
+			added, removed, modified := compareProps(aRel.Props, bRel.Props)
+			if len(added) > 0 || len(removed) > 0 || len(modified) > 0 {
+				diff.ChangedRels = append(diff.ChangedRels, RelChange{
+					Type:           bRel.Type,
+					From:           bRel.From,
+					To:             bRel.To,
+					AddedFields:    added,
+					RemovedFields:  removed,
+					ModifiedFields: modified,
+				})
+			}
+		}
+	}
+
 	return diff, nil
 }
 

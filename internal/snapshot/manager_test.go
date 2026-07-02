@@ -1005,3 +1005,313 @@ func TestToFloat64_Types(t *testing.T) {
 		t.Error("toFloat64(nil) should return false")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// V1-12: LocalDiff 属性级对比测试
+// ---------------------------------------------------------------------------
+
+// TestLocalDiff_ChangedNodes_AddedFields 验证 b 比 a 多出的属性被正确归入 AddedFields。
+func TestLocalDiff_ChangedNodes_AddedFields(t *testing.T) {
+	snapDir := t.TempDir()
+	writeTestSnapshot(t, snapDir, "snap-a",
+		[]yamlNodeItem{
+			{Labels: []string{"Resource", "Device"}, URI: "device:001", Props: map[string]any{"hostname": "r1"}},
+		},
+		nil,
+	)
+	writeTestSnapshot(t, snapDir, "snap-b",
+		[]yamlNodeItem{
+			{Labels: []string{"Resource", "Device"}, URI: "device:001", Props: map[string]any{"hostname": "r1", "status": "up"}},
+		},
+		nil,
+	)
+
+	gdb := &mockGraphDB{}
+	mgr := NewSnapshotManager(gdb, NewGraphLock(), snapDir, 5)
+
+	diff, err := mgr.LocalDiff("snap-a", "snap-b")
+	if err != nil {
+		t.Fatalf("LocalDiff() error = %v", err)
+	}
+
+	if len(diff.ChangedNodes) != 1 {
+		t.Fatalf("ChangedNodes = %d, want 1", len(diff.ChangedNodes))
+	}
+	nc := diff.ChangedNodes[0]
+	if nc.URI != "device:001" {
+		t.Errorf("URI = %q, want %q", nc.URI, "device:001")
+	}
+	if nc.Label != "Device" {
+		t.Errorf("Label = %q, want %q (MostSpecificLabel)", nc.Label, "Device")
+	}
+	if len(nc.AddedFields) != 1 {
+		t.Errorf("AddedFields len = %d, want 1", len(nc.AddedFields))
+	}
+	if nc.AddedFields["status"] != "up" {
+		t.Errorf("AddedFields[status] = %v, want %q", nc.AddedFields["status"], "up")
+	}
+	if len(nc.RemovedFields) != 0 {
+		t.Errorf("RemovedFields should be empty, got %v", nc.RemovedFields)
+	}
+	if len(nc.ModifiedFields) != 0 {
+		t.Errorf("ModifiedFields should be empty, got %v", nc.ModifiedFields)
+	}
+}
+
+// TestLocalDiff_ChangedNodes_RemovedFields 验证 b 比 a 少的属性被正确归入 RemovedFields。
+func TestLocalDiff_ChangedNodes_RemovedFields(t *testing.T) {
+	snapDir := t.TempDir()
+	writeTestSnapshot(t, snapDir, "snap-a",
+		[]yamlNodeItem{
+			{Labels: []string{"Device"}, URI: "device:001", Props: map[string]any{"hostname": "r1", "old_field": "val"}},
+		},
+		nil,
+	)
+	writeTestSnapshot(t, snapDir, "snap-b",
+		[]yamlNodeItem{
+			{Labels: []string{"Device"}, URI: "device:001", Props: map[string]any{"hostname": "r1"}},
+		},
+		nil,
+	)
+
+	gdb := &mockGraphDB{}
+	mgr := NewSnapshotManager(gdb, NewGraphLock(), snapDir, 5)
+
+	diff, err := mgr.LocalDiff("snap-a", "snap-b")
+	if err != nil {
+		t.Fatalf("LocalDiff() error = %v", err)
+	}
+
+	if len(diff.ChangedNodes) != 1 {
+		t.Fatalf("ChangedNodes = %d, want 1", len(diff.ChangedNodes))
+	}
+	nc := diff.ChangedNodes[0]
+	if len(nc.RemovedFields) != 1 {
+		t.Errorf("RemovedFields len = %d, want 1", len(nc.RemovedFields))
+	}
+	if nc.RemovedFields["old_field"] != "val" {
+		t.Errorf("RemovedFields[old_field] = %v, want %q", nc.RemovedFields["old_field"], "val")
+	}
+	if len(nc.AddedFields) != 0 {
+		t.Errorf("AddedFields should be empty, got %v", nc.AddedFields)
+	}
+}
+
+// TestLocalDiff_ChangedNodes_ModifiedFields 验证值不同的属性被正确归入 ModifiedFields，
+// 并验证 int vs float64 数值归一化（int(42) vs float64(42.0) 不应被视为 modified）。
+func TestLocalDiff_ChangedNodes_ModifiedFields(t *testing.T) {
+	snapDir := t.TempDir()
+	writeTestSnapshot(t, snapDir, "snap-a",
+		[]yamlNodeItem{
+			{Labels: []string{"Device"}, URI: "device:001", Props: map[string]any{"status": "up", "mtu": 1500}},
+		},
+		nil,
+	)
+	writeTestSnapshot(t, snapDir, "snap-b",
+		[]yamlNodeItem{
+			{Labels: []string{"Device"}, URI: "device:001", Props: map[string]any{"status": "down", "mtu": 9000}},
+		},
+		nil,
+	)
+
+	gdb := &mockGraphDB{}
+	mgr := NewSnapshotManager(gdb, NewGraphLock(), snapDir, 5)
+
+	diff, err := mgr.LocalDiff("snap-a", "snap-b")
+	if err != nil {
+		t.Fatalf("LocalDiff() error = %v", err)
+	}
+
+	if len(diff.ChangedNodes) != 1 {
+		t.Fatalf("ChangedNodes = %d, want 1", len(diff.ChangedNodes))
+	}
+	nc := diff.ChangedNodes[0]
+	if len(nc.ModifiedFields) != 2 {
+		t.Fatalf("ModifiedFields len = %d, want 2", len(nc.ModifiedFields))
+	}
+	statusFC, ok := nc.ModifiedFields["status"]
+	if !ok {
+		t.Fatal("ModifiedFields[status] not found")
+	}
+	if statusFC.OldValue != "up" || statusFC.NewValue != "down" {
+		t.Errorf("status FieldChange = {%v, %v}, want {up, down}", statusFC.OldValue, statusFC.NewValue)
+	}
+}
+
+// TestLocalDiff_ChangedNodes_NumericNormalization 验证 int(42) vs float64(42.0) 不被视为 modified。
+func TestLocalDiff_ChangedNodes_NumericNormalization(t *testing.T) {
+	snapDir := t.TempDir()
+	// YAML 加载整数为 int，这里手动构造 float64 验证归一化
+	writeTestSnapshot(t, snapDir, "snap-a",
+		[]yamlNodeItem{
+			{Labels: []string{"Device"}, URI: "device:001", Props: map[string]any{"count": 42}},
+		},
+		nil,
+	)
+	writeTestSnapshot(t, snapDir, "snap-b",
+		[]yamlNodeItem{
+			{Labels: []string{"Device"}, URI: "device:001", Props: map[string]any{"count": 42}},
+		},
+		nil,
+	)
+
+	gdb := &mockGraphDB{}
+	mgr := NewSnapshotManager(gdb, NewGraphLock(), snapDir, 5)
+
+	diff, err := mgr.LocalDiff("snap-a", "snap-b")
+	if err != nil {
+		t.Fatalf("LocalDiff() error = %v", err)
+	}
+
+	// 值相同，不应出现在 ChangedNodes
+	if len(diff.ChangedNodes) != 0 {
+		t.Errorf("ChangedNodes should be empty for identical props, got %d", len(diff.ChangedNodes))
+	}
+}
+
+// TestLocalDiff_ChangedNodes_NoChange 验证属性完全相同的节点不出现在 ChangedNodes 中。
+func TestLocalDiff_ChangedNodes_NoChange(t *testing.T) {
+	snapDir := t.TempDir()
+	props := map[string]any{"hostname": "r1", "status": "up", "mtu": 1500}
+	writeTestSnapshot(t, snapDir, "snap-a",
+		[]yamlNodeItem{
+			{Labels: []string{"Device"}, URI: "device:001", Props: props},
+			{Labels: []string{"Device"}, URI: "device:002", Props: map[string]any{"hostname": "r2"}},
+		},
+		nil,
+	)
+	writeTestSnapshot(t, snapDir, "snap-b",
+		[]yamlNodeItem{
+			{Labels: []string{"Device"}, URI: "device:001", Props: props},
+			{Labels: []string{"Device"}, URI: "device:002", Props: map[string]any{"hostname": "r2"}},
+		},
+		nil,
+	)
+
+	gdb := &mockGraphDB{}
+	mgr := NewSnapshotManager(gdb, NewGraphLock(), snapDir, 5)
+
+	diff, err := mgr.LocalDiff("snap-a", "snap-b")
+	if err != nil {
+		t.Fatalf("LocalDiff() error = %v", err)
+	}
+
+	if len(diff.ChangedNodes) != 0 {
+		t.Errorf("ChangedNodes = %d, want 0 (no property diff)", len(diff.ChangedNodes))
+	}
+	if len(diff.ChangedRels) != 0 {
+		t.Errorf("ChangedRels = %d, want 0", len(diff.ChangedRels))
+	}
+	// 原有逻辑：无增删
+	if len(diff.AddedNodes) != 0 {
+		t.Errorf("AddedNodes = %d, want 0", len(diff.AddedNodes))
+	}
+	if len(diff.RemovedNodes) != 0 {
+		t.Errorf("RemovedNodes = %d, want 0", len(diff.RemovedNodes))
+	}
+}
+
+// TestLocalDiff_ChangedRels_ModifiedProps 验证关系 Props 差异被正确归入 ChangedRels。
+func TestLocalDiff_ChangedRels_ModifiedProps(t *testing.T) {
+	snapDir := t.TempDir()
+	writeTestSnapshot(t, snapDir, "snap-a",
+		[]yamlNodeItem{
+			{Labels: []string{"Device"}, URI: "device:001"},
+			{Labels: []string{"Device"}, URI: "device:002"},
+		},
+		[]yamlRelItem{
+			{Type: "CONNECTS", From: "device:001", To: "device:002", Props: map[string]any{"bandwidth": 100}},
+		},
+	)
+	writeTestSnapshot(t, snapDir, "snap-b",
+		[]yamlNodeItem{
+			{Labels: []string{"Device"}, URI: "device:001"},
+			{Labels: []string{"Device"}, URI: "device:002"},
+		},
+		[]yamlRelItem{
+			{Type: "CONNECTS", From: "device:001", To: "device:002", Props: map[string]any{"bandwidth": 200}},
+		},
+	)
+
+	gdb := &mockGraphDB{}
+	mgr := NewSnapshotManager(gdb, NewGraphLock(), snapDir, 5)
+
+	diff, err := mgr.LocalDiff("snap-a", "snap-b")
+	if err != nil {
+		t.Fatalf("LocalDiff() error = %v", err)
+	}
+
+	if len(diff.ChangedRels) != 1 {
+		t.Fatalf("ChangedRels = %d, want 1", len(diff.ChangedRels))
+	}
+	rc := diff.ChangedRels[0]
+	if rc.Type != "CONNECTS" {
+		t.Errorf("Type = %q, want %q", rc.Type, "CONNECTS")
+	}
+	if rc.From != "device:001" {
+		t.Errorf("From = %q, want %q", rc.From, "device:001")
+	}
+	if rc.To != "device:002" {
+		t.Errorf("To = %q, want %q", rc.To, "device:002")
+	}
+	if len(rc.ModifiedFields) != 1 {
+		t.Fatalf("ModifiedFields len = %d, want 1", len(rc.ModifiedFields))
+	}
+	bwFC, ok := rc.ModifiedFields["bandwidth"]
+	if !ok {
+		t.Fatal("ModifiedFields[bandwidth] not found")
+	}
+	if bwFC.OldValue != 100 || bwFC.NewValue != 200 {
+		t.Errorf("bandwidth FieldChange = {%v, %v}, want {100, 200}", bwFC.OldValue, bwFC.NewValue)
+	}
+}
+
+// TestLocalDiff_ExistingLogicPreserved 验证属性级对比不影响原有 AddedNodes/RemovedNodes 逻辑。
+func TestLocalDiff_ExistingLogicPreserved(t *testing.T) {
+	snapDir := t.TempDir()
+	writeTestSnapshot(t, snapDir, "snap-a",
+		[]yamlNodeItem{
+			{Labels: []string{"Device"}, URI: "device:001", Props: map[string]any{"hostname": "r1"}},
+			{Labels: []string{"Device"}, URI: "device:002", Props: map[string]any{"hostname": "r2"}},
+		},
+		[]yamlRelItem{
+			{Type: "CONNECTS", From: "device:001", To: "device:002"},
+		},
+	)
+	writeTestSnapshot(t, snapDir, "snap-b",
+		[]yamlNodeItem{
+			{Labels: []string{"Device"}, URI: "device:002", Props: map[string]any{"hostname": "r2"}},
+			{Labels: []string{"Device"}, URI: "device:003", Props: map[string]any{"hostname": "r3"}},
+		},
+		[]yamlRelItem{
+			{Type: "CONNECTS", From: "device:002", To: "device:003"},
+		},
+	)
+
+	gdb := &mockGraphDB{}
+	mgr := NewSnapshotManager(gdb, NewGraphLock(), snapDir, 5)
+
+	diff, err := mgr.LocalDiff("snap-a", "snap-b")
+	if err != nil {
+		t.Fatalf("LocalDiff() error = %v", err)
+	}
+
+	// 原有增删逻辑
+	if len(diff.AddedNodes) != 1 || diff.AddedNodes[0].URI != "device:003" {
+		t.Errorf("AddedNodes = %v, want [device:003]", diff.AddedNodes)
+	}
+	if len(diff.RemovedNodes) != 1 || diff.RemovedNodes[0].URI != "device:001" {
+		t.Errorf("RemovedNodes = %v, want [device:001]", diff.RemovedNodes)
+	}
+	if len(diff.AddedRels) != 1 {
+		t.Errorf("AddedRels = %d, want 1", len(diff.AddedRels))
+	}
+	if len(diff.RemovedRels) != 1 {
+		t.Errorf("RemovedRels = %d, want 1", len(diff.RemovedRels))
+	}
+
+	// device:002 存在于两边且属性相同，ChangedNodes 应为空
+	if len(diff.ChangedNodes) != 0 {
+		t.Errorf("ChangedNodes = %d, want 0 (device:002 props identical)", len(diff.ChangedNodes))
+	}
+}
