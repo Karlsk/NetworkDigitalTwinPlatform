@@ -33,6 +33,33 @@ type SnapshotDiff struct {
 	RemovedNodes []assembler.Node     // 删除节点
 	AddedRels    []assembler.Relation // 新增关系
 	RemovedRels  []assembler.Relation // 删除关系
+	ChangedNodes []NodeChange         // 属性变更节点
+	ChangedRels  []RelChange          // 属性变更关系
+}
+
+// NodeChange 节点属性级变更。
+type NodeChange struct {
+	URI            string                 // 节点 URI
+	Label          string                 // 节点标签（MostSpecificLabel）
+	AddedFields    map[string]any         // 新增的属性 (b 有 a 无)
+	RemovedFields  map[string]any         // 删除的属性 (a 有 b 无)
+	ModifiedFields map[string]FieldChange // 修改的属性 (a 和 b 都有但值不同)
+}
+
+// FieldChange 单个字段的变更详情。
+type FieldChange struct {
+	OldValue any // 旧值 (快照 a)
+	NewValue any // 新值 (快照 b)
+}
+
+// RelChange 关系属性级变更。
+type RelChange struct {
+	Type           string                 // 关系类型
+	From           string                 // 源节点 URI
+	To             string                 // 目标节点 URI
+	AddedFields    map[string]any         // 新增的属性
+	RemovedFields  map[string]any         // 删除的属性
+	ModifiedFields map[string]FieldChange // 修改的属性
 }
 
 // SnapshotManager 管理快照的创建、存储、恢复和清理。
@@ -458,5 +485,64 @@ func (sm *SnapshotManager) cleanup(ctx context.Context) {
 		sm.mu.Lock()
 		delete(sm.lastAccess, db)
 		sm.mu.Unlock()
+	}
+}
+
+// compareProps 对比两个属性 map，返回 added/removed/modified 三个分类。
+// 数值归一化: int(42) vs float64(42.0) 视为相等。
+func compareProps(a, b map[string]any) (added, removed map[string]any, modified map[string]FieldChange) {
+	added = make(map[string]any)
+	removed = make(map[string]any)
+	modified = make(map[string]FieldChange)
+
+	// b 有 a 无 → added
+	for k, v := range b {
+		if _, ok := a[k]; !ok {
+			added[k] = v
+		}
+	}
+
+	// a 有 b 无 → removed
+	for k, v := range a {
+		if _, ok := b[k]; !ok {
+			removed[k] = v
+		}
+	}
+
+	// 两边都有但值不同 → modified
+	for k, aVal := range a {
+		if bVal, ok := b[k]; ok {
+			if !valuesEqual(aVal, bVal) {
+				modified[k] = FieldChange{OldValue: aVal, NewValue: bVal}
+			}
+		}
+	}
+
+	return
+}
+
+// valuesEqual 比较两个 any 值，处理 int/float64 归一化。
+func valuesEqual(a, b any) bool {
+	// 数值归一化: 都转 float64 比较
+	aFloat, aOK := toFloat64(a)
+	bFloat, bOK := toFloat64(b)
+	if aOK && bOK {
+		return aFloat == bFloat
+	}
+	// 兜底: 字符串表示比较
+	return fmt.Sprintf("%v", a) == fmt.Sprintf("%v", b)
+}
+
+// toFloat64 将数值类型转换为 float64，不支持的类型返回 false。
+func toFloat64(v any) (float64, bool) {
+	switch n := v.(type) {
+	case int:
+		return float64(n), true
+	case int64:
+		return float64(n), true
+	case float64:
+		return n, true
+	default:
+		return 0, false
 	}
 }

@@ -736,3 +736,272 @@ func TestCleanup_TriggeredByEnsureLoaded(t *testing.T) {
 		t.Errorf("cleanup should have been triggered, ClearDB calls = %v", gdb.clearDBCalls)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// V1-11: SnapshotDiff 数据结构扩展测试
+// ---------------------------------------------------------------------------
+
+// TestNodeChangeFields 验证 NodeChange 结构体字段赋值和读取。
+func TestNodeChangeFields(t *testing.T) {
+	nc := NodeChange{
+		URI:   "device:001",
+		Label: "Device",
+		AddedFields: map[string]any{
+			"hostname": "router-01",
+		},
+		RemovedFields: map[string]any{
+			"old_field": "value",
+		},
+		ModifiedFields: map[string]FieldChange{
+			"status": {OldValue: "up", NewValue: "down"},
+		},
+	}
+
+	if nc.URI != "device:001" {
+		t.Errorf("URI = %q, want %q", nc.URI, "device:001")
+	}
+	if nc.Label != "Device" {
+		t.Errorf("Label = %q, want %q", nc.Label, "Device")
+	}
+	if len(nc.AddedFields) != 1 {
+		t.Errorf("AddedFields len = %d, want 1", len(nc.AddedFields))
+	}
+	if len(nc.RemovedFields) != 1 {
+		t.Errorf("RemovedFields len = %d, want 1", len(nc.RemovedFields))
+	}
+	if len(nc.ModifiedFields) != 1 {
+		t.Errorf("ModifiedFields len = %d, want 1", len(nc.ModifiedFields))
+	}
+	if nc.ModifiedFields["status"].OldValue != "up" {
+		t.Errorf("ModifiedFields[status].OldValue = %v, want %q", nc.ModifiedFields["status"].OldValue, "up")
+	}
+}
+
+// TestFieldChangeFields 验证 FieldChange 结构体字段。
+func TestFieldChangeFields(t *testing.T) {
+	fc := FieldChange{
+		OldValue: "active",
+		NewValue: "inactive",
+	}
+
+	if fc.OldValue != "active" {
+		t.Errorf("OldValue = %v, want %q", fc.OldValue, "active")
+	}
+	if fc.NewValue != "inactive" {
+		t.Errorf("NewValue = %v, want %q", fc.NewValue, "inactive")
+	}
+
+	// 数值类型
+	fcNum := FieldChange{OldValue: int(42), NewValue: float64(99.5)}
+	if fcNum.OldValue != int(42) {
+		t.Errorf("OldValue = %v, want 42", fcNum.OldValue)
+	}
+}
+
+// TestRelChangeFields 验证 RelChange 结构体字段。
+func TestRelChangeFields(t *testing.T) {
+	rc := RelChange{
+		Type: "HAS_INTERFACE",
+		From: "device:001",
+		To:   "iface:001_eth0",
+		AddedFields: map[string]any{
+			"bandwidth": 1000,
+		},
+		RemovedFields: map[string]any{
+			"old_prop": "val",
+		},
+		ModifiedFields: map[string]FieldChange{
+			"mtu": {OldValue: 1500, NewValue: 9000},
+		},
+	}
+
+	if rc.Type != "HAS_INTERFACE" {
+		t.Errorf("Type = %q, want %q", rc.Type, "HAS_INTERFACE")
+	}
+	if rc.From != "device:001" {
+		t.Errorf("From = %q, want %q", rc.From, "device:001")
+	}
+	if rc.To != "iface:001_eth0" {
+		t.Errorf("To = %q, want %q", rc.To, "iface:001_eth0")
+	}
+	if len(rc.AddedFields) != 1 {
+		t.Errorf("AddedFields len = %d, want 1", len(rc.AddedFields))
+	}
+	if len(rc.RemovedFields) != 1 {
+		t.Errorf("RemovedFields len = %d, want 1", len(rc.RemovedFields))
+	}
+	if len(rc.ModifiedFields) != 1 {
+		t.Errorf("ModifiedFields len = %d, want 1", len(rc.ModifiedFields))
+	}
+}
+
+// TestSnapshotDiffExtendedFields 验证 SnapshotDiff 的 ChangedNodes/ChangedRels 新字段。
+func TestSnapshotDiffExtendedFields(t *testing.T) {
+	diff := SnapshotDiff{
+		AddedNodes:   []assembler.Node{{Labels: []string{"Device"}, URI: "device:NEW"}},
+		RemovedNodes: []assembler.Node{{Labels: []string{"Device"}, URI: "device:OLD"}},
+		AddedRels:    []assembler.Relation{{Type: "CONNECTS", From: "a", To: "b"}},
+		RemovedRels:  []assembler.Relation{{Type: "CONNECTS", From: "c", To: "d"}},
+		ChangedNodes: []NodeChange{
+			{URI: "device:001", Label: "Device", ModifiedFields: map[string]FieldChange{
+				"status": {OldValue: "up", NewValue: "down"},
+			}},
+		},
+		ChangedRels: []RelChange{
+			{Type: "HAS_INTERFACE", From: "device:001", To: "iface:001_eth0"},
+		},
+	}
+
+	// 验证原有字段不受影响
+	if len(diff.AddedNodes) != 1 {
+		t.Errorf("AddedNodes = %d, want 1", len(diff.AddedNodes))
+	}
+	if len(diff.RemovedNodes) != 1 {
+		t.Errorf("RemovedNodes = %d, want 1", len(diff.RemovedNodes))
+	}
+
+	// 验证新字段
+	if len(diff.ChangedNodes) != 1 {
+		t.Fatalf("ChangedNodes = %d, want 1", len(diff.ChangedNodes))
+	}
+	if diff.ChangedNodes[0].URI != "device:001" {
+		t.Errorf("ChangedNodes[0].URI = %q, want %q", diff.ChangedNodes[0].URI, "device:001")
+	}
+	if diff.ChangedNodes[0].Label != "Device" {
+		t.Errorf("ChangedNodes[0].Label = %q, want %q", diff.ChangedNodes[0].Label, "Device")
+	}
+
+	if len(diff.ChangedRels) != 1 {
+		t.Fatalf("ChangedRels = %d, want 1", len(diff.ChangedRels))
+	}
+	if diff.ChangedRels[0].Type != "HAS_INTERFACE" {
+		t.Errorf("ChangedRels[0].Type = %q, want %q", diff.ChangedRels[0].Type, "HAS_INTERFACE")
+	}
+}
+
+// TestCompareProps_AllCases 验证 added/removed/modified 三分类。
+func TestCompareProps_AllCases(t *testing.T) {
+	a := map[string]any{
+		"hostname": "router-01",
+		"status":   "up",
+		"mtu":      1500,
+		"removed":  "gone",
+	}
+	b := map[string]any{
+		"hostname": "router-01", // 相同
+		"status":   "down",      // modified
+		"mtu":      1500,        // 相同
+		"added":    "new",       // added
+	}
+
+	added, removed, modified := compareProps(a, b)
+
+	// added: b 有 a 无
+	if len(added) != 1 {
+		t.Errorf("added len = %d, want 1", len(added))
+	}
+	if added["added"] != "new" {
+		t.Errorf("added[added] = %v, want %q", added["added"], "new")
+	}
+
+	// removed: a 有 b 无
+	if len(removed) != 1 {
+		t.Errorf("removed len = %d, want 1", len(removed))
+	}
+	if removed["removed"] != "gone" {
+		t.Errorf("removed[removed] = %v, want %q", removed["removed"], "gone")
+	}
+
+	// modified: 两边都有但值不同
+	if len(modified) != 1 {
+		t.Errorf("modified len = %d, want 1", len(modified))
+	}
+	fc, ok := modified["status"]
+	if !ok {
+		t.Fatal("modified[status] not found")
+	}
+	if fc.OldValue != "up" {
+		t.Errorf("modified[status].OldValue = %v, want %q", fc.OldValue, "up")
+	}
+	if fc.NewValue != "down" {
+		t.Errorf("modified[status].NewValue = %v, want %q", fc.NewValue, "down")
+	}
+}
+
+// TestCompareProps_EmptyMaps 空 map 对比返回三个空 map。
+func TestCompareProps_EmptyMaps(t *testing.T) {
+	a := map[string]any{}
+	b := map[string]any{}
+
+	added, removed, modified := compareProps(a, b)
+
+	if len(added) != 0 {
+		t.Errorf("added len = %d, want 0", len(added))
+	}
+	if len(removed) != 0 {
+		t.Errorf("removed len = %d, want 0", len(removed))
+	}
+	if len(modified) != 0 {
+		t.Errorf("modified len = %d, want 0", len(modified))
+	}
+}
+
+// TestValuesEqual_NumericNormalization int(42) vs float64(42.0) 相等。
+func TestValuesEqual_NumericNormalization(t *testing.T) {
+	if !valuesEqual(int(42), float64(42.0)) {
+		t.Error("valuesEqual(int(42), float64(42.0)) = false, want true")
+	}
+	if !valuesEqual(int64(42), float64(42.0)) {
+		t.Error("valuesEqual(int64(42), float64(42.0)) = false, want true")
+	}
+	if !valuesEqual(int(42), int64(42)) {
+		t.Error("valuesEqual(int(42), int64(42)) = false, want true")
+	}
+}
+
+// TestValuesEqual_StringInequality "up" vs "down" 不相等。
+func TestValuesEqual_StringInequality(t *testing.T) {
+	if valuesEqual("up", "down") {
+		t.Error("valuesEqual(\"up\", \"down\") = true, want false")
+	}
+}
+
+// TestValuesEqual_SameString 相同字符串相等。
+func TestValuesEqual_SameString(t *testing.T) {
+	if !valuesEqual("up", "up") {
+		t.Error("valuesEqual(\"up\", \"up\") = false, want true")
+	}
+}
+
+// TestToFloat64_Types int/int64/float64/string 的转换。
+func TestToFloat64_Types(t *testing.T) {
+	// int
+	v, ok := toFloat64(int(42))
+	if !ok || v != 42.0 {
+		t.Errorf("toFloat64(int(42)) = (%v, %v), want (42.0, true)", v, ok)
+	}
+
+	// int64
+	v, ok = toFloat64(int64(100))
+	if !ok || v != 100.0 {
+		t.Errorf("toFloat64(int64(100)) = (%v, %v), want (100.0, true)", v, ok)
+	}
+
+	// float64
+	v, ok = toFloat64(float64(3.14))
+	if !ok || v != 3.14 {
+		t.Errorf("toFloat64(float64(3.14)) = (%v, %v), want (3.14, true)", v, ok)
+	}
+
+	// string (不支持)
+	_, ok = toFloat64("hello")
+	if ok {
+		t.Error("toFloat64(\"hello\") should return false")
+	}
+
+	// nil (不支持)
+	_, ok = toFloat64(nil)
+	if ok {
+		t.Error("toFloat64(nil) should return false")
+	}
+}
