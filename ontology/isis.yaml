@@ -4,6 +4,7 @@ metadata:
   name: ISIS
   labels: [Protocol, Network]
 spec:
+  extends: Resource
   identity:
     stableKeys: [isis_id]
   uriTemplate: "isis:{isis_id}"

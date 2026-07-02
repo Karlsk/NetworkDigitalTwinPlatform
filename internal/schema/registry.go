@@ -4,6 +4,7 @@ package schema
 import (
 	"fmt"
 	"log/slog"
+	"sort"
 )
 
 // SchemaRegistry 本体注册表接口。
@@ -77,6 +78,10 @@ func (r *registryImpl) Load(dir string) error {
 	}
 	for i := range rts {
 		r.relationTypes[rts[i].Metadata.Name] = &rts[i]
+	}
+
+	if err := r.resolveInheritance(); err != nil {
+		return err
 	}
 
 	r.crossValidate()
@@ -155,4 +160,164 @@ func (r *registryImpl) crossValidate() {
 			}
 		}
 	}
+}
+
+// resolveInheritance 解析 EntityType 之间的继承关系。
+// 构建继承图 → 环检测 → 拓扑排序 → 按序合并父类型属性到子类型。
+// 在 Load() 中、crossValidate() 之前调用。
+func (r *registryImpl) resolveInheritance() error {
+	// Step 1: 构建继承图 child → parent
+	inheritance := make(map[string]string)
+	for name, et := range r.entityTypes {
+		if et.Spec.Extends != "" {
+			inheritance[name] = et.Spec.Extends
+		}
+	}
+	if len(inheritance) == 0 {
+		return nil // 无继承关系，直接返回
+	}
+
+	// Step 2: 环检测 (DFS)
+	if err := detectCycle(inheritance); err != nil {
+		return fmt.Errorf("schema inheritance: %w", err)
+	}
+
+	// Step 3: 按拓扑序合并（先处理祖先，再处理后代）
+	order := topoSort(inheritance)
+	for _, child := range order {
+		parent := inheritance[child]
+		if parent == "" {
+			continue
+		}
+		parentET, ok := r.entityTypes[parent]
+		if !ok {
+			return fmt.Errorf("entity type %q extends unknown parent %q", child, parent)
+		}
+		mergeEntityType(r.entityTypes[child], parentET)
+	}
+
+	return nil
+}
+
+// detectCycle 使用 DFS 检测继承图中的环。
+// inheritance 是 child → parent 的映射。
+func detectCycle(inheritance map[string]string) error {
+	visited := make(map[string]bool)
+	inStack := make(map[string]bool)
+
+	var dfs func(node string) error
+	dfs = func(node string) error {
+		if inStack[node] {
+			return fmt.Errorf("circular inheritance detected: %s", node)
+		}
+		if visited[node] {
+			return nil
+		}
+		visited[node] = true
+		inStack[node] = true
+		if parent, ok := inheritance[node]; ok {
+			if err := dfs(parent); err != nil {
+				return err
+			}
+		}
+		inStack[node] = false
+		return nil
+	}
+
+	// 对排序后的 keys 进行 DFS，确保结果确定性
+	keys := make([]string, 0, len(inheritance))
+	for k := range inheritance {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	for _, node := range keys {
+		if err := dfs(node); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// topoSort 对继承图进行拓扑排序，返回处理顺序。
+// 保证祖先先于后代被处理，使得多级继承时合并结果正确。
+func topoSort(inheritance map[string]string) []string {
+	// 收集所有涉及的节点
+	allNodes := make(map[string]bool)
+	for child, parent := range inheritance {
+		allNodes[child] = true
+		allNodes[parent] = true
+	}
+
+	visited := make(map[string]bool)
+	var result []string
+
+	var visit func(node string)
+	visit = func(node string) {
+		if visited[node] {
+			return
+		}
+		visited[node] = true
+		// 先递归处理父节点（祖先优先）
+		if parent, ok := inheritance[node]; ok {
+			visit(parent)
+		}
+		result = append(result, node)
+	}
+
+	// 对排序后的 keys 进行遍历，确保结果确定性
+	keys := make([]string, 0, len(allNodes))
+	for k := range allNodes {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	for _, node := range keys {
+		visit(node)
+	}
+	return result
+}
+
+// mergeEntityType 将父类型的属性合并到子类型。
+// 合并规则：
+//   - Properties: 子类型同名覆盖父类型
+//   - FieldMapping: 子类型同名覆盖父类型
+//   - Normalize: 父类型规则追加到子类型前面
+//   - RelationFields: 子类型同名覆盖父类型
+//   - Identity 和 URITemplate: 不继承，子类型独立定义
+func mergeEntityType(child, parent *EntityType) {
+	// Properties: 合并，子类型同名覆盖父类型
+	if child.Spec.Properties == nil {
+		child.Spec.Properties = make(map[string]PropertySpec)
+	}
+	for k, v := range parent.Spec.Properties {
+		if _, exists := child.Spec.Properties[k]; !exists {
+			child.Spec.Properties[k] = v
+		}
+	}
+
+	// FieldMapping: 合并，子类型覆盖
+	if child.Spec.FieldMapping == nil {
+		child.Spec.FieldMapping = make(map[string]string)
+	}
+	for k, v := range parent.Spec.FieldMapping {
+		if _, exists := child.Spec.FieldMapping[k]; !exists {
+			child.Spec.FieldMapping[k] = v
+		}
+	}
+
+	// Normalize: 父类型规则追加到子类型前面
+	child.Spec.Normalize = append(parent.Spec.Normalize, child.Spec.Normalize...)
+
+	// RelationFields: 合并
+	if child.Spec.RelationFields == nil {
+		child.Spec.RelationFields = make(map[string]RelationFieldSpec)
+	}
+	for k, v := range parent.Spec.RelationFields {
+		if _, exists := child.Spec.RelationFields[k]; !exists {
+			child.Spec.RelationFields[k] = v
+		}
+	}
+
+	// Identity 和 URITemplate: 不继承，子类型独立定义
 }

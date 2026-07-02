@@ -110,8 +110,8 @@ func TestNewSchemaRegistry(t *testing.T) {
 
 func TestLoad_ValidOntology(t *testing.T) {
 	r := loadTestOntology(t)
-	if got := len(r.ListEntityTypes()); got != 9 {
-		t.Errorf("ListEntityTypes() len = %d, want 9", got)
+	if got := len(r.ListEntityTypes()); got != 12 {
+		t.Errorf("ListEntityTypes() len = %d, want 12", got)
 	}
 	if got := len(r.ListRelationTypes()); got != 7 {
 		t.Errorf("ListRelationTypes() len = %d, want 7", got)
@@ -204,14 +204,14 @@ func TestGetRelationType_NotFound(t *testing.T) {
 func TestListEntityTypes_Content(t *testing.T) {
 	r := loadTestOntology(t)
 	ets := r.ListEntityTypes()
-	if len(ets) != 9 {
-		t.Fatalf("ListEntityTypes() len = %d, want 9", len(ets))
+	if len(ets) != 12 {
+		t.Fatalf("ListEntityTypes() len = %d, want 12", len(ets))
 	}
 	names := make(map[string]bool)
 	for _, et := range ets {
 		names[et.Metadata.Name] = true
 	}
-	for _, name := range []string{"Device", "Interface", "ISIS", "Link", "Network_Slice", "Alarm", "VPN", "BGP", "Tunnel"} {
+	for _, name := range []string{"Device", "Interface", "ISIS", "Link", "Network_Slice", "Alarm", "VPN", "BGP", "Tunnel", "Resource", "Service", "Event"} {
 		if !names[name] {
 			t.Errorf("EntityType %q not found in list", name)
 		}
@@ -528,5 +528,555 @@ func TestApplyDefaults_NoDefaultFields(t *testing.T) {
 		if result[k] != v {
 			t.Errorf("result[%q] = %v, want %v", k, result[k], v)
 		}
+	}
+}
+
+// ============================================================
+// Inheritance tests (V1-15)
+// ============================================================
+
+// loadTestRegistry creates a SchemaRegistry from inline YAML files in a temp directory.
+// files is a map of filename -> YAML content.
+func loadTestRegistry(t *testing.T, files map[string]string) (SchemaRegistry, error) {
+	t.Helper()
+	dir := t.TempDir()
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+	r := NewSchemaRegistry()
+	err := r.Load(dir)
+	return r, err
+}
+
+const (
+	resourceBaseYAML = `apiVersion: twin.io/v1
+kind: EntityType
+metadata:
+  name: Resource
+  labels: [Resource]
+spec:
+  identity:
+    stableKeys: []
+  uriTemplate: ""
+  properties:
+    status:
+      type: string
+      enum: [Up, Down, Maintenance]
+    vendor:
+      type: string
+`
+	serviceBaseYAML = `apiVersion: twin.io/v1
+kind: EntityType
+metadata:
+  name: Service
+  labels: [Service]
+spec:
+  identity:
+    stableKeys: []
+  uriTemplate: ""
+  properties:
+    status:
+      type: string
+    name:
+      type: string
+`
+	eventBaseYAML = `apiVersion: twin.io/v1
+kind: EntityType
+metadata:
+  name: Event
+  labels: [Event]
+spec:
+  identity:
+    stableKeys: []
+  uriTemplate: ""
+  properties:
+    timestamp:
+      type: string
+    severity:
+      type: string
+    message:
+      type: string
+`
+)
+
+func TestInheritance_SimpleExtends(t *testing.T) {
+	files := map[string]string{
+		"resource.yaml": resourceBaseYAML,
+		"device.yaml": `apiVersion: twin.io/v1
+kind: EntityType
+metadata:
+  name: Device
+  labels: [Resource, Network]
+spec:
+  extends: Resource
+  identity:
+    stableKeys: [serial_number]
+  uriTemplate: "device:{serial_number}"
+  properties:
+    serial_number:
+      type: string
+      required: true
+    hostname:
+      type: string
+      required: true
+`,
+	}
+	r, err := loadTestRegistry(t, files)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	et, err := r.GetEntityType("Device")
+	if err != nil {
+		t.Fatalf("GetEntityType(Device) error = %v", err)
+	}
+
+	// Device should have its own properties + inherited from Resource
+	if _, ok := et.Spec.Properties["serial_number"]; !ok {
+		t.Error("missing own property serial_number")
+	}
+	if _, ok := et.Spec.Properties["hostname"]; !ok {
+		t.Error("missing own property hostname")
+	}
+	if _, ok := et.Spec.Properties["status"]; !ok {
+		t.Error("missing inherited property status from Resource")
+	}
+	if _, ok := et.Spec.Properties["vendor"]; !ok {
+		t.Error("missing inherited property vendor from Resource")
+	}
+}
+
+func TestInheritance_ChildOverridesParent(t *testing.T) {
+	files := map[string]string{
+		"resource.yaml": resourceBaseYAML,
+		"device.yaml": `apiVersion: twin.io/v1
+kind: EntityType
+metadata:
+  name: Device
+spec:
+  extends: Resource
+  identity:
+    stableKeys: [serial_number]
+  uriTemplate: "device:{serial_number}"
+  properties:
+    serial_number:
+      type: string
+      required: true
+    status:
+      type: string
+      enum: [Active, Inactive]
+      default: "Active"
+`,
+	}
+	r, err := loadTestRegistry(t, files)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	et, err := r.GetEntityType("Device")
+	if err != nil {
+		t.Fatalf("GetEntityType(Device) error = %v", err)
+	}
+
+	// Child's status should override parent's status
+	statusProp, ok := et.Spec.Properties["status"]
+	if !ok {
+		t.Fatal("missing status property")
+	}
+	if len(statusProp.Enum) != 2 || statusProp.Enum[0] != "Active" || statusProp.Enum[1] != "Inactive" {
+		t.Errorf("status enum = %v, want [Active, Inactive] (child override)", statusProp.Enum)
+	}
+	if statusProp.Default != "Active" {
+		t.Errorf("status default = %v, want Active (child override)", statusProp.Default)
+	}
+
+	// Parent's vendor should still be inherited
+	if _, ok := et.Spec.Properties["vendor"]; !ok {
+		t.Error("missing inherited property vendor from Resource")
+	}
+}
+
+func TestInheritance_FieldMappingMerge(t *testing.T) {
+	files := map[string]string{
+		"base.yaml": `apiVersion: twin.io/v1
+kind: EntityType
+metadata:
+  name: Base
+spec:
+  identity:
+    stableKeys: []
+  uriTemplate: ""
+  fieldMapping:
+    base_field: canonical_base
+    shared: base_canonical
+  properties: {}
+`,
+		"child.yaml": `apiVersion: twin.io/v1
+kind: EntityType
+metadata:
+  name: Child
+spec:
+  extends: Base
+  identity:
+    stableKeys: []
+  uriTemplate: ""
+  fieldMapping:
+    child_field: canonical_child
+    shared: child_canonical
+  properties: {}
+`,
+	}
+	r, err := loadTestRegistry(t, files)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	et, err := r.GetEntityType("Child")
+	if err != nil {
+		t.Fatalf("GetEntityType(Child) error = %v", err)
+	}
+
+	// child_field: own
+	if et.Spec.FieldMapping["child_field"] != "canonical_child" {
+		t.Errorf("FieldMapping[child_field] = %q, want canonical_child", et.Spec.FieldMapping["child_field"])
+	}
+	// base_field: inherited
+	if et.Spec.FieldMapping["base_field"] != "canonical_base" {
+		t.Errorf("FieldMapping[base_field] = %q, want canonical_base", et.Spec.FieldMapping["base_field"])
+	}
+	// shared: child overrides parent
+	if et.Spec.FieldMapping["shared"] != "child_canonical" {
+		t.Errorf("FieldMapping[shared] = %q, want child_canonical (child override)", et.Spec.FieldMapping["shared"])
+	}
+}
+
+func TestInheritance_NormalizeMerge(t *testing.T) {
+	files := map[string]string{
+		"base.yaml": `apiVersion: twin.io/v1
+kind: EntityType
+metadata:
+  name: Base
+spec:
+  identity:
+    stableKeys: []
+  uriTemplate: ""
+  normalize:
+    - field: name
+      pattern: " "
+      replace: "_"
+  properties: {}
+`,
+		"child.yaml": `apiVersion: twin.io/v1
+kind: EntityType
+metadata:
+  name: Child
+spec:
+  extends: Base
+  identity:
+    stableKeys: []
+  uriTemplate: ""
+  normalize:
+    - field: hostname
+      pattern: "-"
+      replace: "_"
+  properties: {}
+`,
+	}
+	r, err := loadTestRegistry(t, files)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	et, err := r.GetEntityType("Child")
+	if err != nil {
+		t.Fatalf("GetEntityType(Child) error = %v", err)
+	}
+
+	// Parent rules prepended before child rules
+	if len(et.Spec.Normalize) != 2 {
+		t.Fatalf("Normalize len = %d, want 2", len(et.Spec.Normalize))
+	}
+	if et.Spec.Normalize[0].Field != "name" {
+		t.Errorf("Normalize[0].Field = %q, want name (parent rule first)", et.Spec.Normalize[0].Field)
+	}
+	if et.Spec.Normalize[1].Field != "hostname" {
+		t.Errorf("Normalize[1].Field = %q, want hostname (child rule second)", et.Spec.Normalize[1].Field)
+	}
+}
+
+func TestInheritance_RelationFieldsMerge(t *testing.T) {
+	files := map[string]string{
+		"base.yaml": `apiVersion: twin.io/v1
+kind: EntityType
+metadata:
+  name: Base
+spec:
+  identity:
+    stableKeys: []
+  uriTemplate: ""
+  relationFields:
+    base_rel:
+      relationType: BASE_REL
+  properties: {}
+`,
+		"child.yaml": `apiVersion: twin.io/v1
+kind: EntityType
+metadata:
+  name: Child
+spec:
+  extends: Base
+  identity:
+    stableKeys: []
+  uriTemplate: ""
+  relationFields:
+    child_rel:
+      relationType: CHILD_REL
+  properties: {}
+`,
+	}
+	r, err := loadTestRegistry(t, files)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	et, err := r.GetEntityType("Child")
+	if err != nil {
+		t.Fatalf("GetEntityType(Child) error = %v", err)
+	}
+
+	if len(et.Spec.RelationFields) != 2 {
+		t.Fatalf("RelationFields count = %d, want 2", len(et.Spec.RelationFields))
+	}
+	if et.Spec.RelationFields["child_rel"].RelationType != "CHILD_REL" {
+		t.Errorf("RelationFields[child_rel] = %q, want CHILD_REL", et.Spec.RelationFields["child_rel"].RelationType)
+	}
+	if et.Spec.RelationFields["base_rel"].RelationType != "BASE_REL" {
+		t.Errorf("RelationFields[base_rel] = %q, want BASE_REL (inherited)", et.Spec.RelationFields["base_rel"].RelationType)
+	}
+}
+
+func TestInheritance_IdentityNotInherited(t *testing.T) {
+	files := map[string]string{
+		"resource.yaml": resourceBaseYAML,
+		"device.yaml": `apiVersion: twin.io/v1
+kind: EntityType
+metadata:
+  name: Device
+spec:
+  extends: Resource
+  identity:
+    stableKeys: [serial_number]
+  uriTemplate: "device:{serial_number}"
+  properties:
+    serial_number:
+      type: string
+      required: true
+`,
+	}
+	r, err := loadTestRegistry(t, files)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	et, err := r.GetEntityType("Device")
+	if err != nil {
+		t.Fatalf("GetEntityType(Device) error = %v", err)
+	}
+
+	// Device should keep its own identity
+	if len(et.Spec.Identity.StableKeys) != 1 || et.Spec.Identity.StableKeys[0] != "serial_number" {
+		t.Errorf("StableKeys = %v, want [serial_number]", et.Spec.Identity.StableKeys)
+	}
+	if et.Spec.URITemplate != "device:{serial_number}" {
+		t.Errorf("URITemplate = %q, want device:{serial_number}", et.Spec.URITemplate)
+	}
+
+	// Resource should still have its own (empty) identity
+	res, _ := r.GetEntityType("Resource")
+	if len(res.Spec.Identity.StableKeys) != 0 {
+		t.Errorf("Resource StableKeys = %v, want []", res.Spec.Identity.StableKeys)
+	}
+}
+
+func TestInheritance_CircularDetection(t *testing.T) {
+	files := map[string]string{
+		"a.yaml": `apiVersion: twin.io/v1
+kind: EntityType
+metadata:
+  name: A
+spec:
+  extends: B
+  identity:
+    stableKeys: []
+  uriTemplate: ""
+  properties: {}
+`,
+		"b.yaml": `apiVersion: twin.io/v1
+kind: EntityType
+metadata:
+  name: B
+spec:
+  extends: A
+  identity:
+    stableKeys: []
+  uriTemplate: ""
+  properties: {}
+`,
+	}
+	_, err := loadTestRegistry(t, files)
+	if err == nil {
+		t.Fatal("Load() expected error for circular inheritance, got nil")
+	}
+	if !strings.Contains(err.Error(), "circular inheritance") {
+		t.Errorf("error = %q, want mention of circular inheritance", err.Error())
+	}
+}
+
+func TestInheritance_MultiLevel(t *testing.T) {
+	files := map[string]string{
+		"c.yaml": `apiVersion: twin.io/v1
+kind: EntityType
+metadata:
+  name: C
+spec:
+  identity:
+    stableKeys: []
+  uriTemplate: ""
+  properties:
+    prop_c:
+      type: string
+    shared:
+      type: string
+`,
+		"b.yaml": `apiVersion: twin.io/v1
+kind: EntityType
+metadata:
+  name: B
+spec:
+  extends: C
+  identity:
+    stableKeys: []
+  uriTemplate: ""
+  properties:
+    prop_b:
+      type: string
+`,
+		"a.yaml": `apiVersion: twin.io/v1
+kind: EntityType
+metadata:
+  name: A
+spec:
+  extends: B
+  identity:
+    stableKeys: []
+  uriTemplate: ""
+  properties:
+    prop_a:
+      type: string
+`,
+	}
+	r, err := loadTestRegistry(t, files)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	et, err := r.GetEntityType("A")
+	if err != nil {
+		t.Fatalf("GetEntityType(A) error = %v", err)
+	}
+
+	// A should have properties from B and C via topological merge
+	for _, prop := range []string{"prop_a", "prop_b", "prop_c", "shared"} {
+		if _, ok := et.Spec.Properties[prop]; !ok {
+			t.Errorf("missing property %q in multi-level inheritance", prop)
+		}
+	}
+}
+
+func TestInheritance_UnknownParent(t *testing.T) {
+	files := map[string]string{
+		"child.yaml": `apiVersion: twin.io/v1
+kind: EntityType
+metadata:
+  name: Child
+spec:
+  extends: NonExistent
+  identity:
+    stableKeys: []
+  uriTemplate: ""
+  properties: {}
+`,
+	}
+	_, err := loadTestRegistry(t, files)
+	if err == nil {
+		t.Fatal("Load() expected error for unknown parent, got nil")
+	}
+	if !strings.Contains(err.Error(), "NonExistent") {
+		t.Errorf("error = %q, want mention of NonExistent", err.Error())
+	}
+}
+
+func TestInheritance_BackwardCompatible(t *testing.T) {
+	// No extends field - should work exactly as before
+	files := map[string]string{
+		"device.yaml": `apiVersion: twin.io/v1
+kind: EntityType
+metadata:
+  name: Device
+spec:
+  identity:
+    stableKeys: [serial_number]
+  uriTemplate: "device:{serial_number}"
+  properties:
+    serial_number:
+      type: string
+      required: true
+    hostname:
+      type: string
+`,
+	}
+	r, err := loadTestRegistry(t, files)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	et, err := r.GetEntityType("Device")
+	if err != nil {
+		t.Fatalf("GetEntityType(Device) error = %v", err)
+	}
+	if len(et.Spec.Properties) != 2 {
+		t.Errorf("Properties count = %d, want 2", len(et.Spec.Properties))
+	}
+	if et.Spec.Extends != "" {
+		t.Errorf("Extends = %q, want empty", et.Spec.Extends)
+	}
+}
+
+func TestInheritance_RealOntology(t *testing.T) {
+	r := loadTestOntology(t)
+
+	// Device extends Resource, should inherit vendor property if not already defined
+	et, err := r.GetEntityType("Device")
+	if err != nil {
+		t.Fatalf("GetEntityType(Device) error = %v", err)
+	}
+
+	// Device already defines vendor and status, so count stays 8
+	if len(et.Spec.Properties) != 8 {
+		t.Errorf("Device Properties count = %d, want 8 (own properties override parent)", len(et.Spec.Properties))
+	}
+
+	// Interface extends Resource, should inherit vendor if not defined
+	iface, err := r.GetEntityType("Interface")
+	if err != nil {
+		t.Fatalf("GetEntityType(Interface) error = %v", err)
+	}
+	if _, ok := iface.Spec.Properties["vendor"]; !ok {
+		t.Error("Interface should inherit vendor from Resource")
+	}
+	if _, ok := iface.Spec.Properties["status"]; !ok {
+		t.Error("Interface should have status (own definition)")
 	}
 }

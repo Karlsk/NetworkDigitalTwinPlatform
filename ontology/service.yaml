@@ -1,0 +1,14 @@
+apiVersion: twin.io/v1
+kind: EntityType
+metadata:
+  name: Service
+  labels: [Service]
+spec:
+  identity:
+    stableKeys: []
+  uriTemplate: ""
+  properties:
+    status:
+      type: string
+    name:
+      type: string

@@ -4,6 +4,7 @@ metadata:
   name: Link
   labels: [Resource, Network]
 spec:
+  extends: Resource
   identity:
     stableKeys: [link_id]
   uriTemplate: "link:{link_id}"

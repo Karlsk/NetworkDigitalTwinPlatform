@@ -4,6 +4,7 @@ metadata:
   name: Interface
   labels: [Resource, Network]
 spec:
+  extends: Resource
   identity:
     stableKeys: [device_serial, if_name]
   uriTemplate: "iface:{device_serial}_{if_name}"

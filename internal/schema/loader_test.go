@@ -359,7 +359,7 @@ metadata:
 }
 
 // TestLoadOntologyDir loads the actual ontology/ directory and verifies
-// all 6 EntityTypes and 4 RelationTypes are parsed correctly.
+// all 12 EntityTypes and 7 RelationTypes are parsed correctly.
 // This is an integration test that depends on the ontology YAML files.
 func TestLoadOntologyDir(t *testing.T) {
 	// Resolve ontology directory relative to this test file
@@ -376,8 +376,8 @@ func TestLoadOntologyDir(t *testing.T) {
 	}
 
 	// Verify counts per spec SC-002 and SC-003
-	if len(entityTypes) != 9 {
-		t.Errorf("entityTypes count = %d, want 9", len(entityTypes))
+	if len(entityTypes) != 12 {
+		t.Errorf("entityTypes count = %d, want 12", len(entityTypes))
 	}
 	if len(relationTypes) != 7 {
 		t.Errorf("relationTypes count = %d, want 7", len(relationTypes))

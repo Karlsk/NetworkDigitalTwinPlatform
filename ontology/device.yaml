@@ -4,6 +4,7 @@ metadata:
   name: Device
   labels: [Resource, Network]
 spec:
+  extends: Resource
   identity:
     stableKeys: [serial_number]
   uriTemplate: "device:{serial_number}"

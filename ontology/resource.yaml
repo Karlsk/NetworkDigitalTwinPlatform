@@ -1,0 +1,15 @@
+apiVersion: twin.io/v1
+kind: EntityType
+metadata:
+  name: Resource
+  labels: [Resource]
+spec:
+  identity:
+    stableKeys: []
+  uriTemplate: ""
+  properties:
+    status:
+      type: string
+      enum: [Up, Down, Maintenance]
+    vendor:
+      type: string

@@ -4,6 +4,7 @@ metadata:
   name: Network_Slice
   labels: [Service, Network]
 spec:
+  extends: Service
   identity:
     stableKeys: [slice_id]
   uriTemplate: "slice:{slice_id}"

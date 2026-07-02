@@ -4,6 +4,7 @@ metadata:
   name: Alarm
   labels: [Event, Network]
 spec:
+  extends: Event
   identity:
     stableKeys: [alarm_id]
   uriTemplate: "alarm:{alarm_id}"
