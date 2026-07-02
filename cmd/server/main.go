@@ -45,6 +45,13 @@ func main() {
 	}
 	defer gdb.Close()
 
+	// 3.1 收集所有 Label（含基类），创建 Neo4j 索引
+	allLabels := collectAllLabels(reg)
+	if err := gdb.EnsureIndexes(context.Background(), allLabels); err != nil {
+		slog.Error("failed to ensure indexes", "error", err)
+		os.Exit(1)
+	}
+
 	// 4. 初始化 GraphLock、Normalizer、GraphAssembler
 	lock := snapshot.NewGraphLock()
 	norm := normalizer.NewNormalizer(reg)
@@ -96,4 +103,19 @@ func main() {
 		slog.Error("MCP server error", "error", err)
 		os.Exit(1)
 	}
+}
+
+// collectAllLabels 遍历所有 EntityType，收集包含基类在内的所有 Label（去重）。
+func collectAllLabels(reg schema.SchemaRegistry) []string {
+	seen := make(map[string]bool)
+	var labels []string
+	for _, et := range reg.ListEntityTypes() {
+		for _, label := range reg.GetLabels(et.Metadata.Name) {
+			if !seen[label] {
+				seen[label] = true
+				labels = append(labels, label)
+			}
+		}
+	}
+	return labels
 }

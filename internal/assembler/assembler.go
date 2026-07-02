@@ -54,7 +54,7 @@ func (a *GraphAssembler) Assemble(resources []normalizer.NormalizedResource) (*G
 		}
 
 		node := Node{
-			Labels: []string{res.Kind},
+			Labels: a.registry.GetLabels(res.Kind),
 			URI:    res.URI,
 			Props:  props,
 		}

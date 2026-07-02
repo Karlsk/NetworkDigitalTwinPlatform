@@ -41,6 +41,12 @@ type SchemaRegistry interface {
 	// 原始 map 不被修改。
 	// entityKind 不存在时返回 ErrSchemaNotFound。
 	ApplyDefaults(entityKind string, props map[string]any) (map[string]any, error)
+
+	// GetLabels 返回完整标签链（从基类到具体类）。
+	// 如 Device extends Resource → ["Resource", "Device"]
+	// 无继承 → ["Device"]
+	// 未知实体 → ["UnknownName"]
+	GetLabels(entityKind string) []string
 }
 
 // registryImpl 是 SchemaRegistry 接口的默认实现。
@@ -144,6 +150,37 @@ func (r *registryImpl) ApplyDefaults(entityKind string, props map[string]any) (m
 		return nil, err
 	}
 	return applyDefaults(et, props), nil
+}
+
+// GetLabels 返回完整标签链（从基类到具体类）。
+// 递归向上遍历 extends 链，构建 [base, ..., child] 的标签列表。
+// 使用 visited map 防止循环（正常流程不应触发，因为 resolveInheritance 已做环检测）。
+func (r *registryImpl) GetLabels(entityKind string) []string {
+	et, ok := r.entityTypes[entityKind]
+	if !ok {
+		return []string{entityKind}
+	}
+	if et.Spec.Extends == "" {
+		return []string{entityKind}
+	}
+
+	// 递归构建标签链
+	labels := []string{}
+	current := entityKind
+	visited := make(map[string]bool)
+	for current != "" {
+		if visited[current] {
+			break // 防止循环
+		}
+		visited[current] = true
+		labels = append([]string{current}, labels...)
+		if parentET, ok := r.entityTypes[current]; ok {
+			current = parentET.Spec.Extends
+		} else {
+			break
+		}
+	}
+	return labels
 }
 
 // crossValidate 交叉校验：检查 relationFields 引用的 RelationType 是否都已定义。

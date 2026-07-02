@@ -25,6 +25,7 @@ func (s *stubRegistry) Validate(_ string, _ map[string]any) error        { retur
 func (s *stubRegistry) ApplyDefaults(_ string, props map[string]any) (map[string]any, error) {
 	return props, nil
 }
+func (s *stubRegistry) GetLabels(kind string) []string { return []string{kind} }
 
 // Compile-time check: stubRegistry must satisfy SchemaRegistry interface.
 var _ SchemaRegistry = (*stubRegistry)(nil)
@@ -40,6 +41,7 @@ func TestSchemaRegistryMethodCount(t *testing.T) {
 	_ = r.ListRelationTypes()
 	_ = r.Validate("Device", map[string]any{"serial_number": "SN001"})
 	_, _ = r.ApplyDefaults("Device", map[string]any{"serial_number": "SN001"})
+	_ = r.GetLabels("Device")
 }
 
 // --- Validate immutability contract ---
@@ -1079,4 +1081,79 @@ func TestInheritance_RealOntology(t *testing.T) {
 	if _, ok := iface.Spec.Properties["status"]; !ok {
 		t.Error("Interface should have status (own definition)")
 	}
+}
+
+// ============================================================
+// GetLabels tests (V1-16)
+// ============================================================
+
+func TestGetLabels_NoExtends(t *testing.T) {
+	r := loadTestOntology(t)
+	labels := r.GetLabels("BGP")
+	if len(labels) != 1 || labels[0] != "BGP" {
+		t.Errorf("GetLabels(BGP) = %v, want [BGP]", labels)
+	}
+}
+
+func TestGetLabels_SingleLevel(t *testing.T) {
+	r := loadTestOntology(t)
+	labels := r.GetLabels("Device")
+	if len(labels) != 2 {
+		t.Fatalf("GetLabels(Device) len = %d, want 2", len(labels))
+	}
+	if labels[0] != "Resource" || labels[1] != "Device" {
+		t.Errorf("GetLabels(Device) = %v, want [Resource Device]", labels)
+	}
+}
+
+func TestGetLabels_UnknownEntity(t *testing.T) {
+	r := loadTestOntology(t)
+	labels := r.GetLabels("NonExistent")
+	if len(labels) != 1 || labels[0] != "NonExistent" {
+		t.Errorf("GetLabels(NonExistent) = %v, want [NonExistent]", labels)
+	}
+}
+
+func TestGetLabels_AllRealOntology(t *testing.T) {
+	r := loadTestOntology(t)
+	cases := []struct {
+		kind  string
+		want  []string
+	}{
+		{"Device", []string{"Resource", "Device"}},
+		{"Interface", []string{"Resource", "Interface"}},
+		{"ISIS", []string{"Resource", "ISIS"}},
+		{"Link", []string{"Resource", "Link"}},
+		{"Network_Slice", []string{"Service", "Network_Slice"}},
+		{"Alarm", []string{"Event", "Alarm"}},
+		{"BGP", []string{"BGP"}},
+		{"Tunnel", []string{"Tunnel"}},
+		{"VPN", []string{"VPN"}},
+	}
+	for _, tc := range cases {
+		got := r.GetLabels(tc.kind)
+		if len(got) != len(tc.want) {
+			t.Errorf("GetLabels(%s) = %v, want %v", tc.kind, got, tc.want)
+			continue
+		}
+		for i, l := range got {
+			if l != tc.want[i] {
+				t.Errorf("GetLabels(%s)[%d] = %q, want %q", tc.kind, i, l, tc.want[i])
+			}
+		}
+	}
+}
+
+func TestGetLabels_CycleProtection(t *testing.T) {
+	// 直接操作内部 map 构造环（绕过 Load 的环检测）
+	r := NewSchemaRegistry().(*registryImpl)
+	r.entityTypes["A"] = &EntityType{Spec: EntityTypeSpec{Extends: "B"}}
+	r.entityTypes["B"] = &EntityType{Spec: EntityTypeSpec{Extends: "A"}}
+
+	labels := r.GetLabels("A")
+	// 不死循环即通过（break 保护生效）
+	if len(labels) == 0 {
+		t.Error("GetLabels(A) should not return empty slice")
+	}
+	t.Logf("GetLabels(A) with cycle = %v", labels)
 }

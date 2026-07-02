@@ -389,6 +389,7 @@ func (m *mockRegistry) Validate(_ string, _ map[string]any) error               
 func (m *mockRegistry) ApplyDefaults(_ string, p map[string]any) (map[string]any, error) {
 	return p, nil
 }
+func (m *mockRegistry) GetLabels(kind string) []string { return []string{kind} }
 
 func (m *mockRegistry) GetEntityType(name string) (*schema.EntityType, error) {
 	et, ok := m.entityTypes[name]
@@ -1397,5 +1398,146 @@ func TestAssemble_NilProperties(t *testing.T) {
 	// 无警告
 	if len(warnings) != 0 {
 		t.Errorf("warnings count = %d, want 0", len(warnings))
+	}
+}
+
+// ---------------------------------------------------------------------
+// V1-16: 多标签节点测试
+// ---------------------------------------------------------------------
+
+// TestAssemble_MultiLabel_Device 验证 Device 节点的 Labels 包含完整继承链。
+func TestAssemble_MultiLabel_Device(t *testing.T) {
+	reg := loadTestOntology(t)
+	a := NewGraphAssembler(reg)
+
+	resources := []normalizer.NormalizedResource{
+		{
+			Kind: "Device",
+			URI:  "device:SN001",
+			Properties: map[string]any{
+				"serial_number": "SN001",
+				"hostname":      "router-01",
+			},
+		},
+	}
+
+	gm, _, err := a.Assemble(resources)
+	if err != nil {
+		t.Fatalf("Assemble() error = %v", err)
+	}
+
+	if len(gm.Nodes) != 1 {
+		t.Fatalf("Nodes count = %d, want 1", len(gm.Nodes))
+	}
+
+	node := gm.Nodes[0]
+	if len(node.Labels) != 2 {
+		t.Fatalf("Labels len = %d, want 2", len(node.Labels))
+	}
+	if node.Labels[0] != "Resource" || node.Labels[1] != "Device" {
+		t.Errorf("Labels = %v, want [Resource Device]", node.Labels)
+	}
+	if node.MostSpecificLabel() != "Device" {
+		t.Errorf("MostSpecificLabel = %q, want Device", node.MostSpecificLabel())
+	}
+}
+
+// TestAssemble_MultiLabel_Interface 验证 Interface 节点的 Labels 包含完整继承链。
+func TestAssemble_MultiLabel_Interface(t *testing.T) {
+	reg := loadTestOntology(t)
+	a := NewGraphAssembler(reg)
+
+	resources := []normalizer.NormalizedResource{
+		{
+			Kind: "Interface",
+			URI:  "iface:SN001_GE1/0/1",
+			Properties: map[string]any{
+				"device_serial": "SN001",
+				"if_name":       "GE1/0/1",
+			},
+		},
+	}
+
+	gm, _, err := a.Assemble(resources)
+	if err != nil {
+		t.Fatalf("Assemble() error = %v", err)
+	}
+
+	if len(gm.Nodes) != 1 {
+		t.Fatalf("Nodes count = %d, want 1", len(gm.Nodes))
+	}
+
+	node := gm.Nodes[0]
+	if len(node.Labels) != 2 {
+		t.Fatalf("Labels len = %d, want 2", len(node.Labels))
+	}
+	if node.Labels[0] != "Resource" || node.Labels[1] != "Interface" {
+		t.Errorf("Labels = %v, want [Resource Interface]", node.Labels)
+	}
+}
+
+// TestAssemble_MultiLabel_NetworkSlice 验证 Network_Slice 节点的 Labels 包含 Service 基类。
+func TestAssemble_MultiLabel_NetworkSlice(t *testing.T) {
+	reg := loadTestOntology(t)
+	a := NewGraphAssembler(reg)
+
+	resources := []normalizer.NormalizedResource{
+		{
+			Kind: "Network_Slice",
+			URI:  "slice:SL001",
+			Properties: map[string]any{
+				"slice_id":      "SL001",
+				"name":          "slice-1",
+				"sla_bandwidth": 1000,
+			},
+		},
+	}
+
+	gm, _, err := a.Assemble(resources)
+	if err != nil {
+		t.Fatalf("Assemble() error = %v", err)
+	}
+
+	if len(gm.Nodes) != 1 {
+		t.Fatalf("Nodes count = %d, want 1", len(gm.Nodes))
+	}
+
+	node := gm.Nodes[0]
+	if len(node.Labels) != 2 {
+		t.Fatalf("Labels len = %d, want 2", len(node.Labels))
+	}
+	if node.Labels[0] != "Service" || node.Labels[1] != "Network_Slice" {
+		t.Errorf("Labels = %v, want [Service Network_Slice]", node.Labels)
+	}
+}
+
+// TestAssemble_SingleLabel_NoExtends 验证无继承的实体仍为单标签（向后兼容）。
+func TestAssemble_SingleLabel_NoExtends(t *testing.T) {
+	reg := loadTestOntology(t)
+	a := NewGraphAssembler(reg)
+
+	resources := []normalizer.NormalizedResource{
+		{
+			Kind: "BGP",
+			URI:  "bgp:BGP001",
+			Properties: map[string]any{
+				"bgp_id":    "BGP001",
+				"as_number": 65001,
+			},
+		},
+	}
+
+	gm, _, err := a.Assemble(resources)
+	if err != nil {
+		t.Fatalf("Assemble() error = %v", err)
+	}
+
+	if len(gm.Nodes) != 1 {
+		t.Fatalf("Nodes count = %d, want 1", len(gm.Nodes))
+	}
+
+	node := gm.Nodes[0]
+	if len(node.Labels) != 1 || node.Labels[0] != "BGP" {
+		t.Errorf("Labels = %v, want [BGP]", node.Labels)
 	}
 }
