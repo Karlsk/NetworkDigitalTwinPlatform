@@ -52,6 +52,12 @@ func (m *mockSnapshotService) Restore(_ context.Context, name string) error {
 	m.restoreName = name
 	return m.restoreErr
 }
+func (m *mockSnapshotService) AuditQuery(_ snapshot.AuditFilter) []snapshot.AuditEntry {
+	return nil
+}
+func (m *mockSnapshotService) AuditRecent(_ int) []snapshot.AuditEntry {
+	return nil
+}
 
 // mockSyncService 实现 syncService 接口。
 type mockSyncService struct {

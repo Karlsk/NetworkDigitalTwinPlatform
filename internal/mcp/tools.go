@@ -28,6 +28,8 @@ type snapshotService interface {
 	List(ctx context.Context) ([]snapshot.SnapshotMeta, error)
 	Diff(ctx context.Context, a, b string) (*snapshot.SnapshotDiff, error)
 	Restore(ctx context.Context, name string) error
+	AuditQuery(filter snapshot.AuditFilter) []snapshot.AuditEntry
+	AuditRecent(n int) []snapshot.AuditEntry
 }
 
 // syncService 封装同步服务操作，由 *service.SyncService 隐式满足。
@@ -80,9 +82,10 @@ func (h *toolHandlers) handleQueryTopology(
 
 // QuerySnapshotInput 定义 query_snapshot 工具的输入参数。
 type QuerySnapshotInput struct {
-	Action string `json:"action" jsonschema:"操作类型: list (列出快照) 或 diff (对比快照)"`
+	Action string `json:"action" jsonschema:"操作类型: list (列出快照) 或 diff (对比快照) 或 audit (审计日志)"`
 	SnapA  string `json:"snap_a,omitempty" jsonschema:"diff 模式下的第一个快照名称"`
 	SnapB  string `json:"snap_b,omitempty" jsonschema:"diff 模式下的第二个快照名称"`
+	Limit  int    `json:"limit,omitempty" jsonschema:"audit 模式下返回的最近条目数，默认 50"`
 }
 
 // SnapshotMetaOutput 快照元数据输出。
@@ -97,6 +100,17 @@ type SnapshotMetaOutput struct {
 type QuerySnapshotOutput struct {
 	Snapshots []SnapshotMetaOutput `json:"snapshots,omitempty"`
 	Diff      *SnapshotDiffOutput  `json:"diff,omitempty"`
+	Audit     []AuditEntryOutput   `json:"audit,omitempty"`
+}
+
+// AuditEntryOutput 审计日志条目输出。
+type AuditEntryOutput struct {
+	Timestamp string `json:"timestamp"`
+	Action    string `json:"action"`
+	Snapshot  string `json:"snapshot"`
+	Actor     string `json:"actor"`
+	Detail    string `json:"detail"`
+	Error     string `json:"error,omitempty"`
 }
 
 // SnapshotDiffOutput 快照对比差异输出。
@@ -150,8 +164,28 @@ func (h *toolHandlers) handleQuerySnapshot(
 		slog.Info("query_snapshot diff completed", "snap_a", in.SnapA, "snap_b", in.SnapB)
 		return nil, QuerySnapshotOutput{Diff: &out}, nil
 
+	case "audit":
+		limit := in.Limit
+		if limit <= 0 {
+			limit = 50
+		}
+		entries := h.snapshotSvc.AuditRecent(limit)
+		var out []AuditEntryOutput
+		for _, e := range entries {
+			out = append(out, AuditEntryOutput{
+				Timestamp: e.Timestamp.Format(time.RFC3339),
+				Action:    e.Action,
+				Snapshot:  e.Snapshot,
+				Actor:     e.Actor,
+				Detail:    e.Detail,
+				Error:     e.Error,
+			})
+		}
+		slog.Info("query_snapshot audit completed", "count", len(out))
+		return nil, QuerySnapshotOutput{Audit: out}, nil
+
 	default:
-		return nil, QuerySnapshotOutput{}, fmt.Errorf("unknown action %q, expected list or diff", in.Action)
+		return nil, QuerySnapshotOutput{}, fmt.Errorf("unknown action %q, expected list, diff, or audit", in.Action)
 	}
 }
 

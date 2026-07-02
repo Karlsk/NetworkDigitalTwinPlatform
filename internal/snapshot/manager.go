@@ -74,6 +74,7 @@ type SnapshotManager struct {
 	metaCache  map[string]SnapshotMeta // 新增: name → meta 缓存
 	cacheMu    sync.RWMutex            // 新增: 缓存读写锁
 	cacheReady bool                    // 新增: 缓存是否已预热
+	auditLog   *AuditLog               // V1-18: 审计日志
 }
 
 // NewSnapshotManager 创建快照管理器。
@@ -85,26 +86,43 @@ func NewSnapshotManager(g graph.GraphDB, lock *GraphLock, snapDir string, maxAct
 		maxActive:  maxActive,
 		lastAccess: make(map[string]time.Time),
 		metaCache:  make(map[string]SnapshotMeta),
+		auditLog:   NewAuditLog(1000), // V1-18: 默认保留 1000 条审计记录
 	}
+}
+
+// AuditLog 返回审计日志实例，供外部（如 MCP/Service）查询审计记录。
+func (sm *SnapshotManager) AuditLog() *AuditLog {
+	return sm.auditLog
 }
 
 // Create 创建快照：从 default 逻辑 DB 导出数据并归档为 YAML 文件。
 // 使用 RLock 允许并发读，阻塞写操作。
-func (sm *SnapshotManager) Create(ctx context.Context, name string) (SnapshotMeta, error) {
+func (sm *SnapshotManager) Create(ctx context.Context, name string) (meta SnapshotMeta, err error) {
 	sm.lock.RLock()
 	defer sm.lock.RUnlock()
+
+	// V1-18: 审计日志 — 无论成功失败都记录
+	defer func() {
+		sm.auditLog.Record(AuditEntry{
+			Action:   "create",
+			Snapshot: name,
+			Actor:    "system",
+			Detail:   fmt.Sprintf("nodes=%d, rels=%d", meta.NodeCount, meta.RelCount),
+			Error:    errStr(err),
+		})
+	}()
 
 	// 分页读取 default DB 全部节点（SKIP/LIMIT 防止大数据集 OOM）
 	const pageSize = 500
 	var nodes []assembler.Node
 	for skip := 0; ; skip += pageSize {
-		rows, err := sm.graph.Query(ctx, "default",
+		rows, queryErr := sm.graph.Query(ctx, "default",
 			`MATCH (n) WHERE n._db = $_db `+
 				`RETURN labels(n) AS labels, n.uri AS uri, properties(n) AS props `+
 				`ORDER BY n.uri SKIP $skip LIMIT $limit`,
 			map[string]any{"skip": skip, "limit": pageSize})
-		if err != nil {
-			return SnapshotMeta{}, fmt.Errorf("query nodes: %w", err)
+		if queryErr != nil {
+			return SnapshotMeta{}, fmt.Errorf("query nodes: %w", queryErr)
 		}
 		for _, row := range rows {
 			labels := anyToStringSlice(row["labels"])
@@ -126,13 +144,13 @@ func (sm *SnapshotManager) Create(ctx context.Context, name string) (SnapshotMet
 	// 分页读取 default DB 全部关系（SKIP/LIMIT 防止大数据集 OOM）
 	var rels []assembler.Relation
 	for skip := 0; ; skip += pageSize {
-		rows, err := sm.graph.Query(ctx, "default",
+		rows, queryErr := sm.graph.Query(ctx, "default",
 			`MATCH (src)-[r]->(dst) WHERE src._db = $_db `+
 				`RETURN type(r) AS type, src.uri AS from, dst.uri AS to, properties(r) AS props `+
 				`ORDER BY src.uri SKIP $skip LIMIT $limit`,
 			map[string]any{"skip": skip, "limit": pageSize})
-		if err != nil {
-			return SnapshotMeta{}, fmt.Errorf("query relations: %w", err)
+		if queryErr != nil {
+			return SnapshotMeta{}, fmt.Errorf("query relations: %w", queryErr)
 		}
 		for _, row := range rows {
 			typ, _ := row["type"].(string)
@@ -154,7 +172,7 @@ func (sm *SnapshotManager) Create(ctx context.Context, name string) (SnapshotMet
 	}
 
 	filePath := filepath.Join(sm.snapDir, name+".yaml")
-	meta := SnapshotMeta{
+	meta = SnapshotMeta{
 		Name:      name,
 		CreatedAt: time.Now(),
 		NodeCount: len(nodes),
@@ -162,8 +180,8 @@ func (sm *SnapshotManager) Create(ctx context.Context, name string) (SnapshotMet
 		FilePath:  filePath,
 	}
 
-	if err := exportToYAML(filePath, meta, nodes, rels); err != nil {
-		return SnapshotMeta{}, fmt.Errorf("export yaml: %w", err)
+	if exportErr := exportToYAML(filePath, meta, nodes, rels); exportErr != nil {
+		return SnapshotMeta{}, fmt.Errorf("export yaml: %w", exportErr)
 	}
 
 	// 写入缓存
@@ -231,14 +249,25 @@ func (sm *SnapshotManager) warmCache(_ context.Context) ([]SnapshotMeta, error) 
 }
 
 // Delete 删除快照：清理 Neo4j 逻辑 DB，保留 YAML 归档文件。
-func (sm *SnapshotManager) Delete(ctx context.Context, name string) error {
-	exists, err := sm.graph.HasDB(ctx, name)
-	if err != nil {
-		return fmt.Errorf("has db: %w", err)
+func (sm *SnapshotManager) Delete(ctx context.Context, name string) (err error) {
+	// V1-18: 审计日志 — 无论成功失败都记录
+	defer func() {
+		sm.auditLog.Record(AuditEntry{
+			Action:   "delete",
+			Snapshot: name,
+			Actor:    "system",
+			Detail:   "delete snapshot",
+			Error:    errStr(err),
+		})
+	}()
+
+	exists, hasErr := sm.graph.HasDB(ctx, name)
+	if hasErr != nil {
+		return fmt.Errorf("has db: %w", hasErr)
 	}
 	if exists {
-		if err := sm.graph.ClearDB(ctx, name); err != nil {
-			return fmt.Errorf("clear db: %w", err)
+		if clearErr := sm.graph.ClearDB(ctx, name); clearErr != nil {
+			return fmt.Errorf("clear db: %w", clearErr)
 		}
 	}
 
@@ -284,20 +313,31 @@ func extractProps(v any) map[string]any {
 
 // Restore 恢复快照到 default 逻辑 DB。
 // 获取写锁，确保恢复期间无其他写操作。
-func (sm *SnapshotManager) Restore(ctx context.Context, name string) error {
+func (sm *SnapshotManager) Restore(ctx context.Context, name string) (err error) {
 	sm.lock.Lock()
 	defer sm.lock.Unlock()
 
-	if err := sm.EnsureLoaded(ctx, name); err != nil {
-		return fmt.Errorf("ensure loaded: %w", err)
+	// V1-18: 审计日志 — 无论成功失败都记录
+	defer func() {
+		sm.auditLog.Record(AuditEntry{
+			Action:   "restore",
+			Snapshot: name,
+			Actor:    "system",
+			Detail:   "restore to default",
+			Error:    errStr(err),
+		})
+	}()
+
+	if loadErr := sm.EnsureLoaded(ctx, name); loadErr != nil {
+		return fmt.Errorf("ensure loaded: %w", loadErr)
 	}
 
-	if err := sm.graph.ClearDB(ctx, "default"); err != nil {
-		return fmt.Errorf("clear default: %w", err)
+	if clearErr := sm.graph.ClearDB(ctx, "default"); clearErr != nil {
+		return fmt.Errorf("clear default: %w", clearErr)
 	}
 
-	if err := sm.graph.CloneDB(ctx, name, "default"); err != nil {
-		return fmt.Errorf("clone db: %w", err)
+	if cloneErr := sm.graph.CloneDB(ctx, name, "default"); cloneErr != nil {
+		return fmt.Errorf("clone db: %w", cloneErr)
 	}
 
 	return nil

@@ -48,3 +48,13 @@ func (s *SnapshotService) Create(ctx context.Context, name string) (snapshot.Sna
 func (s *SnapshotService) Delete(ctx context.Context, name string) error {
 	return s.manager.Delete(ctx, name)
 }
+
+// AuditQuery 按过滤条件查询审计日志。
+func (s *SnapshotService) AuditQuery(filter snapshot.AuditFilter) []snapshot.AuditEntry {
+	return s.manager.AuditLog().Query(filter)
+}
+
+// AuditRecent 返回最近 n 条审计日志。
+func (s *SnapshotService) AuditRecent(n int) []snapshot.AuditEntry {
+	return s.manager.AuditLog().Recent(n)
+}
