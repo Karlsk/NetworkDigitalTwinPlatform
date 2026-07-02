@@ -2,6 +2,7 @@
 package snapshot
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 
@@ -34,6 +35,27 @@ func (item yamlNodeItemImport) getLabels() []string {
 type yamlNodesDocImport struct {
 	Kind  string                 `yaml:"kind"`
 	Items []yamlNodeItemImport   `yaml:"items"`
+}
+
+// importMetaOnly 只解码第一个 YAML 文档（meta），不解码 nodes/rels。
+// 性能提升: 从 O(N*全文档) 降为 O(N*meta文档头)。
+func importMetaOnly(filePath string) (SnapshotMeta, error) {
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return SnapshotMeta{}, fmt.Errorf("read file for meta: %w", err)
+	}
+	decoder := yaml.NewDecoder(bytes.NewReader(data))
+	var metaDoc yamlMetaDoc
+	if err := decoder.Decode(&metaDoc); err != nil {
+		return SnapshotMeta{}, fmt.Errorf("parse meta from %s: %w", filePath, err)
+	}
+	return SnapshotMeta{
+		Name:      metaDoc.Name,
+		CreatedAt: metaDoc.CreatedAt,
+		NodeCount: metaDoc.NodeCount,
+		RelCount:  metaDoc.RelCount,
+		FilePath:  filePath,
+	}, nil
 }
 
 // importFromYAML 从 YAML 多文档文件读取快照数据。

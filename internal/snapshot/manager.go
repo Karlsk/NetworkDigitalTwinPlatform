@@ -71,6 +71,9 @@ type SnapshotManager struct {
 	maxActive  int
 	lastAccess map[string]time.Time
 	mu         sync.Mutex // 保护 lastAccess
+	metaCache  map[string]SnapshotMeta // 新增: name → meta 缓存
+	cacheMu    sync.RWMutex            // 新增: 缓存读写锁
+	cacheReady bool                    // 新增: 缓存是否已预热
 }
 
 // NewSnapshotManager 创建快照管理器。
@@ -81,6 +84,7 @@ func NewSnapshotManager(g graph.GraphDB, lock *GraphLock, snapDir string, maxAct
 		snapDir:    snapDir,
 		maxActive:  maxActive,
 		lastAccess: make(map[string]time.Time),
+		metaCache:  make(map[string]SnapshotMeta),
 	}
 }
 
@@ -162,30 +166,68 @@ func (sm *SnapshotManager) Create(ctx context.Context, name string) (SnapshotMet
 		return SnapshotMeta{}, fmt.Errorf("export yaml: %w", err)
 	}
 
+	// 写入缓存
+	sm.cacheMu.Lock()
+	sm.metaCache[meta.Name] = meta
+	sm.cacheReady = true
+	sm.cacheMu.Unlock()
+
 	return meta, nil
 }
 
 // List 列出所有 YAML 归档快照的元数据。
-func (sm *SnapshotManager) List(_ context.Context) ([]SnapshotMeta, error) {
+// 优先从缓存读取；缓存未预热时触发 warmCache 全量预热。
+func (sm *SnapshotManager) List(ctx context.Context) ([]SnapshotMeta, error) {
+	sm.cacheMu.RLock()
+	if sm.cacheReady {
+		result := make([]SnapshotMeta, 0, len(sm.metaCache))
+		for _, meta := range sm.metaCache {
+			result = append(result, meta)
+		}
+		sm.cacheMu.RUnlock()
+		return result, nil
+	}
+	sm.cacheMu.RUnlock()
+
+	// 缓存未预热: 全量 warm cache
+	return sm.warmCache(ctx)
+}
+
+// warmCache 扫描快照目录，只解析 meta 文档头，填充 metaCache。
+func (sm *SnapshotManager) warmCache(_ context.Context) ([]SnapshotMeta, error) {
+	sm.cacheMu.Lock()
+	defer sm.cacheMu.Unlock()
+
+	// 双重检查: 防止并发 warmCache 重复执行
+	if sm.cacheReady {
+		result := make([]SnapshotMeta, 0, len(sm.metaCache))
+		for _, meta := range sm.metaCache {
+			result = append(result, meta)
+		}
+		return result, nil
+	}
+
 	entries, err := os.ReadDir(sm.snapDir)
 	if err != nil {
 		return nil, fmt.Errorf("read snap dir: %w", err)
 	}
 
-	var metas []SnapshotMeta
+	var result []SnapshotMeta
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".yaml") {
 			continue
 		}
 		filePath := filepath.Join(sm.snapDir, e.Name())
-		_, _, meta, err := importFromYAML(filePath)
+		meta, err := importMetaOnly(filePath)
 		if err != nil {
 			continue // 跳过损坏的快照文件
 		}
-		metas = append(metas, meta)
+		sm.metaCache[meta.Name] = meta
+		result = append(result, meta)
 	}
 
-	return metas, nil
+	sm.cacheReady = true
+	return result, nil
 }
 
 // Delete 删除快照：清理 Neo4j 逻辑 DB，保留 YAML 归档文件。
@@ -199,6 +241,12 @@ func (sm *SnapshotManager) Delete(ctx context.Context, name string) error {
 			return fmt.Errorf("clear db: %w", err)
 		}
 	}
+
+	// 从缓存删除
+	sm.cacheMu.Lock()
+	delete(sm.metaCache, name)
+	sm.cacheMu.Unlock()
+
 	return nil
 }
 

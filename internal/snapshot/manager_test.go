@@ -3,6 +3,7 @@ package snapshot
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -1840,6 +1841,308 @@ func TestDiff_LocalDiffConsistency(t *testing.T) {
 			if _, ok := cypherRC.ModifiedFields[k]; !ok {
 				t.Errorf("Rel %q ModifiedFields key %q missing in cypher result", key, k)
 			}
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// V1-17: MetaCache 测试
+// ---------------------------------------------------------------------------
+
+// TestImportMetaOnly_ValidFile 验证只解析第一个 YAML 文档（meta），返回正确的 SnapshotMeta。
+func TestImportMetaOnly_ValidFile(t *testing.T) {
+	snapDir := t.TempDir()
+	writeTestSnapshot(t, snapDir, "snap-meta",
+		[]yamlNodeItem{{Labels: []string{"Device"}, URI: "device:001"}},
+		[]yamlRelItem{{Type: "CONNECTS", From: "device:001", To: "device:002"}},
+	)
+
+	filePath := filepath.Join(snapDir, "snap-meta.yaml")
+	meta, err := importMetaOnly(filePath)
+	if err != nil {
+		t.Fatalf("importMetaOnly() error = %v", err)
+	}
+	if meta.Name != "snap-meta" {
+		t.Errorf("Name = %q, want %q", meta.Name, "snap-meta")
+	}
+	if meta.NodeCount != 1 {
+		t.Errorf("NodeCount = %d, want 1", meta.NodeCount)
+	}
+	if meta.RelCount != 1 {
+		t.Errorf("RelCount = %d, want 1", meta.RelCount)
+	}
+	if meta.FilePath != filePath {
+		t.Errorf("FilePath = %q, want %q", meta.FilePath, filePath)
+	}
+}
+
+// TestImportMetaOnly_FileNotFound 不存在文件返回错误。
+func TestImportMetaOnly_FileNotFound(t *testing.T) {
+	_, err := importMetaOnly("/nonexistent/path/snap.yaml")
+	if err == nil {
+		t.Fatal("importMetaOnly() should return error for missing file")
+	}
+}
+
+// TestImportMetaOnly_InvalidYAML 损坏 YAML 返回错误。
+func TestImportMetaOnly_InvalidYAML(t *testing.T) {
+	snapDir := t.TempDir()
+	filePath := filepath.Join(snapDir, "bad.yaml")
+	// 使用 YAML 序列无法解析为结构体，触发 Decode 错误
+	if err := os.WriteFile(filePath, []byte("- item1\n- item2\n"), 0644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	_, err := importMetaOnly(filePath)
+	if err == nil {
+		t.Fatal("importMetaOnly() should return error for invalid YAML")
+	}
+}
+
+// TestList_SecondCallFromCache 第一次 List 触发 warmCache，第二次从缓存返回。
+func TestList_SecondCallFromCache(t *testing.T) {
+	snapDir := t.TempDir()
+	writeTestSnapshot(t, snapDir, "snap-a",
+		[]yamlNodeItem{{Labels: []string{"Device"}, URI: "device:001"}}, nil,
+	)
+	writeTestSnapshot(t, snapDir, "snap-b",
+		[]yamlNodeItem{{Labels: []string{"Device"}, URI: "device:002"}}, nil,
+	)
+
+	gdb := &mockGraphDB{}
+	mgr := NewSnapshotManager(gdb, NewGraphLock(), snapDir, 5)
+
+	// 第一次 List: 触发 warmCache
+	metas1, err := mgr.List(context.Background())
+	if err != nil {
+		t.Fatalf("List() #1 error = %v", err)
+	}
+	if len(metas1) != 2 {
+		t.Fatalf("List() #1 returned %d, want 2", len(metas1))
+	}
+
+	// 第二次 List: 从缓存返回
+	metas2, err := mgr.List(context.Background())
+	if err != nil {
+		t.Fatalf("List() #2 error = %v", err)
+	}
+	if len(metas2) != 2 {
+		t.Errorf("List() #2 returned %d, want 2", len(metas2))
+	}
+
+	// 验证结果一致
+	names1 := make(map[string]bool)
+	for _, m := range metas1 {
+		names1[m.Name] = true
+	}
+	for _, m := range metas2 {
+		if !names1[m.Name] {
+			t.Errorf("List() #2 has %q not in #1", m.Name)
+		}
+	}
+}
+
+// TestList_EmptyDir_NoCache 空目录时 List 返回空切片。
+func TestList_EmptyDir_NoCache(t *testing.T) {
+	gdb := &mockGraphDB{}
+	mgr := NewSnapshotManager(gdb, NewGraphLock(), t.TempDir(), 5)
+
+	metas, err := mgr.List(context.Background())
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if len(metas) != 0 {
+		t.Errorf("List() returned %d, want 0", len(metas))
+	}
+}
+
+// TestCreate_ListImmediatelyVisible Create 后 List 立即可见新快照。
+func TestCreate_ListImmediatelyVisible(t *testing.T) {
+	gdb := &mockGraphDB{
+		queryResults: []map[string]any{
+			{"labels": []any{"Device"}, "uri": "device:SN001", "props": map[string]any{"hostname": "r1"}},
+		},
+	}
+	lock := NewGraphLock()
+	snapDir := t.TempDir()
+	mgr := NewSnapshotManager(gdb, lock, snapDir, 5)
+
+	// Create 快照
+	meta, err := mgr.Create(context.Background(), "snap-new")
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if meta.Name != "snap-new" {
+		t.Fatalf("Create() meta.Name = %q, want %q", meta.Name, "snap-new")
+	}
+
+	// List 应立即包含新快照
+	metas, err := mgr.List(context.Background())
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	found := false
+	for _, m := range metas {
+		if m.Name == "snap-new" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("List() should contain snap-new after Create, got %v", metas)
+	}
+}
+
+// TestDelete_ListImmediatelyInvisible Delete 后 List 立即不可见该快照。
+func TestDelete_ListImmediatelyInvisible(t *testing.T) {
+	gdb := &mockGraphDB{
+		queryResults: []map[string]any{
+			{"labels": []any{"Device"}, "uri": "device:SN001", "props": map[string]any{"hostname": "r1"}},
+		},
+		hasDBResult: map[string]bool{"snap-del": true},
+	}
+	lock := NewGraphLock()
+	snapDir := t.TempDir()
+	mgr := NewSnapshotManager(gdb, lock, snapDir, 5)
+
+	// Create 快照
+	if _, err := mgr.Create(context.Background(), "snap-del"); err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	// 确认 List 可见
+	metas, _ := mgr.List(context.Background())
+	if len(metas) != 1 {
+		t.Fatalf("List() before delete = %d, want 1", len(metas))
+	}
+
+	// Delete 快照
+	if err := mgr.Delete(context.Background(), "snap-del"); err != nil {
+		t.Fatalf("Delete() error = %v", err)
+	}
+
+	// List 应立即不可见
+	metas, err := mgr.List(context.Background())
+	if err != nil {
+		t.Fatalf("List() after delete error = %v", err)
+	}
+	for _, m := range metas {
+		if m.Name == "snap-del" {
+			t.Errorf("List() should not contain snap-del after Delete")
+		}
+	}
+}
+
+// TestList_ConcurrentNoRace 多 goroutine 并发调用 List，配合 -race 无 data race。
+func TestList_ConcurrentNoRace(t *testing.T) {
+	snapDir := t.TempDir()
+	for i := 0; i < 5; i++ {
+		name := fmt.Sprintf("snap-%d", i)
+		writeTestSnapshot(t, snapDir, name,
+			[]yamlNodeItem{{Labels: []string{"Device"}, URI: fmt.Sprintf("device:%d", i)}}, nil,
+		)
+	}
+
+	gdb := &mockGraphDB{}
+	mgr := NewSnapshotManager(gdb, NewGraphLock(), snapDir, 5)
+
+	const goroutines = 10
+	var wg sync.WaitGroup
+	wg.Add(goroutines)
+	for i := 0; i < goroutines; i++ {
+		go func() {
+			defer wg.Done()
+			metas, err := mgr.List(context.Background())
+			if err != nil {
+				t.Errorf("List() error = %v", err)
+				return
+			}
+			if len(metas) != 5 {
+				t.Errorf("List() returned %d, want 5", len(metas))
+			}
+		}()
+	}
+	wg.Wait()
+}
+
+// TestWarmCache_PopulatesCache 验证 warmCache 后 metaCache 包含所有快照。
+func TestWarmCache_PopulatesCache(t *testing.T) {
+	snapDir := t.TempDir()
+	writeTestSnapshot(t, snapDir, "snap-x",
+		[]yamlNodeItem{{Labels: []string{"Device"}, URI: "device:001"}}, nil,
+	)
+	writeTestSnapshot(t, snapDir, "snap-y",
+		[]yamlNodeItem{{Labels: []string{"Device"}, URI: "device:002"}}, nil,
+	)
+
+	gdb := &mockGraphDB{}
+	mgr := NewSnapshotManager(gdb, NewGraphLock(), snapDir, 5)
+
+	// warmCache 通过 List 触发
+	metas, err := mgr.List(context.Background())
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if len(metas) != 2 {
+		t.Fatalf("List() returned %d, want 2", len(metas))
+	}
+
+	// 验证缓存已填充
+	mgr.cacheMu.RLock()
+	cacheLen := len(mgr.metaCache)
+	_, hasX := mgr.metaCache["snap-x"]
+	_, hasY := mgr.metaCache["snap-y"]
+	mgr.cacheMu.RUnlock()
+
+	if cacheLen != 2 {
+		t.Errorf("metaCache len = %d, want 2", cacheLen)
+	}
+	if !hasX {
+		t.Error("metaCache missing snap-x")
+	}
+	if !hasY {
+		t.Error("metaCache missing snap-y")
+	}
+}
+
+// BenchmarkList_100Snapshots 创建 100 个快照文件，warm cache 后 List 性能。
+func BenchmarkList_100Snapshots(b *testing.B) {
+	snapDir := b.TempDir()
+	for i := 0; i < 100; i++ {
+		name := fmt.Sprintf("snap-%03d", i)
+		filePath := filepath.Join(snapDir, name+".yaml")
+		f, err := os.Create(filePath)
+		if err != nil {
+			b.Fatalf("create file: %v", err)
+		}
+		enc := yaml.NewEncoder(f)
+		meta := yamlMetaDoc{
+			Kind: "SnapshotMeta", Name: name, CreatedAt: time.Now(),
+			NodeCount: 1, RelCount: 0,
+		}
+		_ = enc.Encode(meta)
+		_ = enc.Encode(yamlNodesDoc{Kind: "Nodes", Items: []yamlNodeItem{
+			{Labels: []string{"Device"}, URI: fmt.Sprintf("device:%d", i)},
+		}})
+		_ = enc.Encode(yamlRelsDoc{Kind: "Relations"})
+		enc.Close()
+		f.Close()
+	}
+
+	gdb := &mockGraphDB{}
+	mgr := NewSnapshotManager(gdb, NewGraphLock(), snapDir, 5)
+
+	// 预热缓存
+	_, _ = mgr.List(context.Background())
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		metas, err := mgr.List(context.Background())
+		if err != nil {
+			b.Fatalf("List() error = %v", err)
+		}
+		if len(metas) != 100 {
+			b.Fatalf("List() returned %d, want 100", len(metas))
 		}
 	}
 }
