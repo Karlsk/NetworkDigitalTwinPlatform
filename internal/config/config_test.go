@@ -20,6 +20,7 @@ server:
 snapshot:
   dir: "/tmp/test-snapshots"
   max_active: 10
+  retention_days: 30
 
 schema:
   ontology_dir: "/tmp/test-ontology"
@@ -73,6 +74,9 @@ func TestLoad_ValidConfig(t *testing.T) {
 	if cfg.Snapshot.MaxActive != 10 {
 		t.Errorf("Snapshot.MaxActive = %d, want %d", cfg.Snapshot.MaxActive, 10)
 	}
+	if cfg.Snapshot.RetentionDays != 30 {
+		t.Errorf("Snapshot.RetentionDays = %d, want %d", cfg.Snapshot.RetentionDays, 30)
+	}
 
 	// Schema
 	if cfg.Schema.OntologyDir != "/tmp/test-ontology" {
@@ -105,6 +109,9 @@ func TestLoad_Defaults(t *testing.T) {
 	}
 	if cfg.Snapshot.MaxActive != 5 {
 		t.Errorf("Snapshot.MaxActive default = %d, want %d", cfg.Snapshot.MaxActive, 5)
+	}
+	if cfg.Snapshot.RetentionDays != 0 {
+		t.Errorf("Snapshot.RetentionDays default = %d, want %d", cfg.Snapshot.RetentionDays, 0)
 	}
 	if cfg.Schema.OntologyDir != "ontology" {
 		t.Errorf("Schema.OntologyDir default = %q, want %q", cfg.Schema.OntologyDir, "ontology")

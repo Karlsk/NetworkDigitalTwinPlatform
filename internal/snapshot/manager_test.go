@@ -2105,6 +2105,302 @@ func TestWarmCache_PopulatesCache(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// V1-20: TTL 保留策略测试
+// ---------------------------------------------------------------------------
+
+// writeTestSnapshotWithTime 创建自定义 CreatedAt 的测试用 YAML 快照文件。
+func writeTestSnapshotWithTime(t *testing.T, dir, name string, createdAt time.Time, nodes []yamlNodeItem, rels []yamlRelItem) {
+	t.Helper()
+	filePath := filepath.Join(dir, name+".yaml")
+	f, err := os.Create(filePath)
+	if err != nil {
+		t.Fatalf("create file: %v", err)
+	}
+	defer f.Close()
+
+	enc := yaml.NewEncoder(f)
+	defer enc.Close()
+
+	meta := yamlMetaDoc{
+		Kind: "SnapshotMeta", Name: name, CreatedAt: createdAt,
+		NodeCount: len(nodes), RelCount: len(rels),
+	}
+	if err := enc.Encode(meta); err != nil {
+		t.Fatalf("encode meta: %v", err)
+	}
+	if err := enc.Encode(yamlNodesDoc{Kind: "Nodes", Items: nodes}); err != nil {
+		t.Fatalf("encode nodes: %v", err)
+	}
+	if err := enc.Encode(yamlRelsDoc{Kind: "Relations", Items: rels}); err != nil {
+		t.Fatalf("encode rels: %v", err)
+	}
+}
+
+// TC-TTL01: retentionDays=0 不自动清理
+func TestCleanupExpired_RetentionDaysZero_NoCleanup(t *testing.T) {
+	snapDir := t.TempDir()
+	old := time.Now().AddDate(0, 0, -60)
+
+	writeTestSnapshotWithTime(t, snapDir, "snap-old-1", old,
+		[]yamlNodeItem{{Labels: []string{"Device"}, URI: "device:001"}}, nil)
+	writeTestSnapshotWithTime(t, snapDir, "snap-old-2", old,
+		[]yamlNodeItem{{Labels: []string{"Device"}, URI: "device:002"}}, nil)
+
+	gdb := &mockGraphDB{}
+	mgr := NewSnapshotManager(gdb, NewGraphLock(), snapDir, 5)
+	// retentionDays 默认为 0，不设置
+
+	// 预热 metaCache
+	if _, err := mgr.List(context.Background()); err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+
+	// Create 触发 cleanupExpired
+	if _, err := mgr.Create(context.Background(), "snap-new"); err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	// 验证: 两个旧快照仍在 metaCache 中（未被清理）
+	mgr.cacheMu.RLock()
+	_, hasOld1 := mgr.metaCache["snap-old-1"]
+	_, hasOld2 := mgr.metaCache["snap-old-2"]
+	cacheLen := len(mgr.metaCache)
+	mgr.cacheMu.RUnlock()
+
+	if !hasOld1 {
+		t.Error("snap-old-1 should still be in metaCache when retentionDays=0")
+	}
+	if !hasOld2 {
+		t.Error("snap-old-2 should still be in metaCache when retentionDays=0")
+	}
+	// snap-new + 2 old = 3
+	if cacheLen != 3 {
+		t.Errorf("metaCache len = %d, want 3", cacheLen)
+	}
+}
+
+// TC-TTL02: retentionDays>0 自动清理过期快照
+func TestCleanupExpired_RetentionDaysPositive_CleansExpired(t *testing.T) {
+	snapDir := t.TempDir()
+	oldTime := time.Now().AddDate(0, 0, -60)
+	newTime := time.Now().AddDate(0, 0, -1)
+
+	writeTestSnapshotWithTime(t, snapDir, "snap-old", oldTime,
+		[]yamlNodeItem{{Labels: []string{"Device"}, URI: "device:001"}}, nil)
+	writeTestSnapshotWithTime(t, snapDir, "snap-new", newTime,
+		[]yamlNodeItem{{Labels: []string{"Device"}, URI: "device:002"}}, nil)
+
+	gdb := &mockGraphDB{
+		hasDBResult: map[string]bool{"snap-old": true},
+	}
+	mgr := NewSnapshotManager(gdb, NewGraphLock(), snapDir, 5)
+	mgr.SetRetentionDays(30)
+
+	// 预热 metaCache
+	if _, err := mgr.List(context.Background()); err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+
+	// Create 触发 cleanupExpired
+	if _, err := mgr.Create(context.Background(), "snap-now"); err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	// 验证: snap-old 被清理，snap-new 保留，snap-now 新建
+	mgr.cacheMu.RLock()
+	_, hasOld := mgr.metaCache["snap-old"]
+	_, hasNew := mgr.metaCache["snap-new"]
+	_, hasNow := mgr.metaCache["snap-now"]
+	cacheLen := len(mgr.metaCache)
+	mgr.cacheMu.RUnlock()
+
+	if hasOld {
+		t.Error("snap-old should have been cleaned up (60 days > 30 days TTL)")
+	}
+	if !hasNew {
+		t.Error("snap-new should still be in metaCache (1 day < 30 days TTL)")
+	}
+	if !hasNow {
+		t.Error("snap-now should be in metaCache (just created)")
+	}
+	if cacheLen != 2 {
+		t.Errorf("metaCache len = %d, want 2", cacheLen)
+	}
+
+	// 验证 HasDB 被调用检查 snap-old
+	var hasDBCalled bool
+	for _, call := range gdb.clearDBCalls {
+		if call == "snap-old" {
+			hasDBCalled = true
+		}
+	}
+	if !hasDBCalled {
+		t.Error("ClearDB should have been called for snap-old")
+	}
+}
+
+// TC-TTL03: auto_delete 审计日志记录
+func TestCleanupExpired_AutoDeleteAuditLog(t *testing.T) {
+	snapDir := t.TempDir()
+	oldTime := time.Now().AddDate(0, 0, -60)
+
+	writeTestSnapshotWithTime(t, snapDir, "snap-expired", oldTime,
+		[]yamlNodeItem{{Labels: []string{"Device"}, URI: "device:001"}}, nil)
+
+	gdb := &mockGraphDB{
+		hasDBResult: map[string]bool{"snap-expired": true},
+	}
+	mgr := NewSnapshotManager(gdb, NewGraphLock(), snapDir, 5)
+	mgr.SetRetentionDays(30)
+
+	// 预热 metaCache
+	if _, err := mgr.List(context.Background()); err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+
+	// Create 触发 cleanupExpired
+	if _, err := mgr.Create(context.Background(), "snap-now"); err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	// 验证: 审计日志包含 auto_delete 条目
+	entries := mgr.AuditLog().Query(AuditFilter{Action: "auto_delete"})
+	if len(entries) == 0 {
+		t.Fatal("expected auto_delete audit entry, got none")
+	}
+
+	found := false
+	for _, e := range entries {
+		if e.Snapshot == "snap-expired" && e.Actor == "system" && e.Detail == "expired TTL cleanup" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected auto_delete entry for snap-expired, entries: %+v", entries)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// V1-21: MetaCache 测试
+// ---------------------------------------------------------------------------
+
+// TC-MC01: List 第二次调用命中缓存，耗时 < 1ms。
+func TestMetaCache_ListPerformance(t *testing.T) {
+	snapDir := t.TempDir()
+	for i := 0; i < 10; i++ {
+		writeTestSnapshotWithTime(t, snapDir, fmt.Sprintf("snap-perf-%02d", i), time.Now(),
+			[]yamlNodeItem{{Labels: []string{"Device"}, URI: fmt.Sprintf("device:%d", i)}}, nil)
+	}
+
+	gdb := &mockGraphDB{}
+	mgr := NewSnapshotManager(gdb, NewGraphLock(), snapDir, 5)
+
+	// 第一次 List() 触发 warmCache
+	if _, err := mgr.List(context.Background()); err != nil {
+		t.Fatalf("first List() error = %v", err)
+	}
+
+	// 第二次 List() 应命中缓存
+	start := time.Now()
+	metas, err := mgr.List(context.Background())
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatalf("second List() error = %v", err)
+	}
+	if len(metas) != 10 {
+		t.Errorf("List() returned %d, want 10", len(metas))
+	}
+	if elapsed >= time.Millisecond {
+		t.Errorf("second List() took %v, want < 1ms (cache hit)", elapsed)
+	}
+}
+
+// TC-MC02: Create 后 List 可见新快照。
+func TestMetaCache_CreateInvalidates(t *testing.T) {
+	snapDir := t.TempDir()
+	writeTestSnapshotWithTime(t, snapDir, "snap-existing", time.Now(),
+		[]yamlNodeItem{{Labels: []string{"Device"}, URI: "device:001"}}, nil)
+
+	gdb := &mockGraphDB{}
+	mgr := NewSnapshotManager(gdb, NewGraphLock(), snapDir, 5)
+
+	// 预热缓存
+	metas1, err := mgr.List(context.Background())
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if len(metas1) != 1 {
+		t.Fatalf("List() returned %d, want 1", len(metas1))
+	}
+
+	// Create 新快照
+	if _, err := mgr.Create(context.Background(), "snap-new"); err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	// 再次 List() 应包含 snap-new
+	metas2, err := mgr.List(context.Background())
+	if err != nil {
+		t.Fatalf("List() after Create error = %v", err)
+	}
+	found := false
+	for _, m := range metas2 {
+		if m.Name == "snap-new" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("List() after Create should contain snap-new")
+	}
+	if len(metas2) != 2 {
+		t.Errorf("List() after Create returned %d, want 2", len(metas2))
+	}
+}
+
+// TC-MC03: Delete 后 List 不再包含已删除快照。
+func TestMetaCache_DeleteInvalidates(t *testing.T) {
+	snapDir := t.TempDir()
+	writeTestSnapshotWithTime(t, snapDir, "snap-a", time.Now(),
+		[]yamlNodeItem{{Labels: []string{"Device"}, URI: "device:001"}}, nil)
+	writeTestSnapshotWithTime(t, snapDir, "snap-b", time.Now(),
+		[]yamlNodeItem{{Labels: []string{"Device"}, URI: "device:002"}}, nil)
+
+	gdb := &mockGraphDB{
+		hasDBResult: map[string]bool{"snap-a": true, "snap-b": true},
+	}
+	mgr := NewSnapshotManager(gdb, NewGraphLock(), snapDir, 5)
+
+	// 预热缓存
+	metas1, err := mgr.List(context.Background())
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if len(metas1) != 2 {
+		t.Fatalf("List() returned %d, want 2", len(metas1))
+	}
+
+	// Delete snap-a
+	if err := mgr.Delete(context.Background(), "snap-a"); err != nil {
+		t.Fatalf("Delete() error = %v", err)
+	}
+
+	// 再次 List() 不应包含 snap-a
+	metas2, err := mgr.List(context.Background())
+	if err != nil {
+		t.Fatalf("List() after Delete error = %v", err)
+	}
+	for _, m := range metas2 {
+		if m.Name == "snap-a" {
+			t.Error("List() after Delete should not contain snap-a")
+		}
+	}
+	if len(metas2) != 1 {
+		t.Errorf("List() after Delete returned %d, want 1", len(metas2))
+	}
+}
+
 // BenchmarkList_100Snapshots 创建 100 个快照文件，warm cache 后 List 性能。
 func BenchmarkList_100Snapshots(b *testing.B) {
 	snapDir := b.TempDir()

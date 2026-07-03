@@ -75,6 +75,7 @@ type SnapshotManager struct {
 	cacheMu    sync.RWMutex            // 新增: 缓存读写锁
 	cacheReady bool                    // 新增: 缓存是否已预热
 	auditLog   *AuditLog               // V1-18: 审计日志
+	retentionDays int                  // V1-20: TTL 保留天数，0 = 不自动清理
 }
 
 // NewSnapshotManager 创建快照管理器。
@@ -93,6 +94,42 @@ func NewSnapshotManager(g graph.GraphDB, lock *GraphLock, snapDir string, maxAct
 // AuditLog 返回审计日志实例，供外部（如 MCP/Service）查询审计记录。
 func (sm *SnapshotManager) AuditLog() *AuditLog {
 	return sm.auditLog
+}
+
+// SetRetentionDays 设置快照 TTL 保留天数。days <= 0 表示不自动清理。
+func (sm *SnapshotManager) SetRetentionDays(days int) {
+	sm.retentionDays = days
+}
+
+// cleanupExpired 按 TTL 策略清理超期快照。retentionDays <= 0 时不执行任何操作。
+func (sm *SnapshotManager) cleanupExpired(ctx context.Context) {
+	if sm.retentionDays <= 0 {
+		return
+	}
+	cutoff := time.Now().AddDate(0, 0, -sm.retentionDays)
+
+	sm.cacheMu.RLock()
+	var expired []string
+	for name, meta := range sm.metaCache {
+		if meta.CreatedAt.Before(cutoff) {
+			expired = append(expired, name)
+		}
+	}
+	sm.cacheMu.RUnlock()
+
+	for _, name := range expired {
+		if err := sm.Delete(ctx, name); err != nil {
+			slog.Warn("cleanup expired snapshot failed", "snapshot", name, "error", err)
+		} else {
+			slog.Info("cleaned up expired snapshot", "snapshot", name)
+			sm.auditLog.Record(AuditEntry{
+				Action:   "auto_delete",
+				Snapshot: name,
+				Actor:    "system",
+				Detail:   "expired TTL cleanup",
+			})
+		}
+	}
 }
 
 // Create 创建快照：从 default 逻辑 DB 导出数据并归档为 YAML 文件。
@@ -189,6 +226,9 @@ func (sm *SnapshotManager) Create(ctx context.Context, name string) (meta Snapsh
 	sm.metaCache[meta.Name] = meta
 	sm.cacheReady = true
 	sm.cacheMu.Unlock()
+
+	// V1-20: Create 后触发 TTL 过期清理
+	sm.cleanupExpired(ctx)
 
 	return meta, nil
 }

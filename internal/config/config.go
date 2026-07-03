@@ -32,8 +32,9 @@ type ServerConfig struct {
 
 // SnapshotConfig 是快照管理配置
 type SnapshotConfig struct {
-	Dir       string `mapstructure:"dir"`
-	MaxActive int    `mapstructure:"max_active"`
+	Dir           string `mapstructure:"dir"`
+	MaxActive     int    `mapstructure:"max_active"`
+	RetentionDays int    `mapstructure:"retention_days"` // V1-20: TTL 保留天数，0 = 不自动清理
 }
 
 // SchemaConfig 是本体 Schema 配置
@@ -58,6 +59,7 @@ func Load(path string) (*Config, error) {
 	v.SetDefault("server.port", 8080)
 	v.SetDefault("snapshot.dir", "snapshots")
 	v.SetDefault("snapshot.max_active", 5)
+	v.SetDefault("snapshot.retention_days", 0) // V1-20: 默认不自动清理
 	v.SetDefault("schema.ontology_dir", "ontology")
 	v.SetDefault("channel.buffer_size", 100)
 

@@ -11,6 +11,7 @@ server:
 snapshot:
   dir: "snapshots"
   max_active: 5
+  retention_days: 30  # 0 = 不自动清理
 
 schema:
   ontology_dir: "ontology"

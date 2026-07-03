@@ -85,6 +85,7 @@ func main() {
 	snapMgr := snapshot.NewSnapshotManager(
 		gdb, lock, cfg.Snapshot.Dir, cfg.Snapshot.MaxActive,
 	)
+	snapMgr.SetRetentionDays(cfg.Snapshot.RetentionDays) // V1-20: TTL 保留策略
 
 	// 8. 初始化 AnalysisService 和 SnapshotService
 	analysisSvc := service.NewAnalysisService(gdb, lock)
