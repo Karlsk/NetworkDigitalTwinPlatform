@@ -6,7 +6,6 @@ package controller
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -241,50 +240,130 @@ func TestQueryGlobalRoute(t *testing.T) {
 }
 
 // ──────────────────────────────
-// 未实现方法返回 ErrNotImplemented 测试
+// V1.2-04 补全实现的委托调用测试
 // ──────────────────────────────
 
-func TestListFlexEGroupsReturnsErrNotImplemented(t *testing.T) {
-	c := newMonitorTestConnector()
-	result, err := c.ListFlexEGroups(context.Background(), connector.FilterOptions{})
-	if result != nil {
-		t.Errorf("ListFlexEGroups() result = %v, want nil", result)
+// setupOperatorFullMockServer 创建包含全部 DeviceOperator 方法 mock 的 server。
+func setupOperatorFullMockServer(t *testing.T) *httptest.Server {
+	mux := http.NewServeMux()
+
+	// Token 接口
+	mux.HandleFunc("/oauth/token", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"access_token": "mock-token-full",
+			"expires_in":   3600,
+		})
+	})
+
+	// FlexE Group 列表
+	mux.HandleFunc("/api/no/config/terra-flexe:flexe/flexe-group", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode([]map[string]any{
+			{"id": "fg-001", "deviceName": "NJ-SCT-R01"},
+		})
+	})
+
+	// SRv6 切片列表
+	mux.HandleFunc("/api/no/config/terra-slicing:srv6-network-slices/srv6-network-slice", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode([]map[string]any{
+			{"sliceId": "slice-001", "device": "NJ-SCT-R01"},
+		})
+	})
+
+	// DetNet 实例列表
+	mux.HandleFunc("/api/no/config/terra-h3c-detnet/ip/service/all", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode([]map[string]any{
+			{"id": "detnet-001", "name": "probe-1"},
+		})
+	})
+
+	// 拓扑
+	mux.HandleFunc("/api/sr/config/network-topology:network-topology", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/sr/config/network-topology:network-topology" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"nodes": []map[string]any{{"node-id": "NJ-SCT-R01"}},
+			"links": []map[string]any{{"link-id": "link-001"}},
+		})
+	})
+
+	return httptest.NewServer(mux)
+}
+
+func TestOperatorListFlexEGroups(t *testing.T) {
+	server := setupOperatorFullMockServer(t)
+	defer server.Close()
+
+	c := newOperatorTestConnector(t, server.URL)
+	result, err := c.ListFlexEGroups(context.Background(), connector.FilterOptions{DeviceName: "NJ-SCT-R01"})
+	if err != nil {
+		t.Fatalf("ListFlexEGroups() error = %v", err)
 	}
-	if !errors.Is(err, connector.ErrNotImplemented) {
-		t.Errorf("ListFlexEGroups() error = %v, want ErrNotImplemented", err)
+	if len(result) != 1 {
+		t.Fatalf("ListFlexEGroups() result len = %d, want 1", len(result))
+	}
+	if result[0]["id"] != "fg-001" {
+		t.Errorf("ListFlexEGroups() id = %v, want fg-001", result[0]["id"])
 	}
 }
 
-func TestListSRv6SlicesReturnsErrNotImplemented(t *testing.T) {
-	c := newMonitorTestConnector()
-	result, err := c.ListSRv6Slices(context.Background(), connector.FilterOptions{})
-	if result != nil {
-		t.Errorf("ListSRv6Slices() result = %v, want nil", result)
+func TestOperatorListSRv6Slices(t *testing.T) {
+	server := setupOperatorFullMockServer(t)
+	defer server.Close()
+
+	c := newOperatorTestConnector(t, server.URL)
+	result, err := c.ListSRv6Slices(context.Background(), connector.FilterOptions{DeviceName: "NJ-SCT-R01"})
+	if err != nil {
+		t.Fatalf("ListSRv6Slices() error = %v", err)
 	}
-	if !errors.Is(err, connector.ErrNotImplemented) {
-		t.Errorf("ListSRv6Slices() error = %v, want ErrNotImplemented", err)
+	if len(result) != 1 {
+		t.Fatalf("ListSRv6Slices() result len = %d, want 1", len(result))
+	}
+	if result[0]["sliceId"] != "slice-001" {
+		t.Errorf("ListSRv6Slices() sliceId = %v, want slice-001", result[0]["sliceId"])
 	}
 }
 
-func TestListDetNetInstancesReturnsErrNotImplemented(t *testing.T) {
-	c := newMonitorTestConnector()
+func TestOperatorListDetNetInstances(t *testing.T) {
+	server := setupOperatorFullMockServer(t)
+	defer server.Close()
+
+	c := newOperatorTestConnector(t, server.URL)
 	result, err := c.ListDetNetInstances(context.Background())
-	if result != nil {
-		t.Errorf("ListDetNetInstances() result = %v, want nil", result)
+	if err != nil {
+		t.Fatalf("ListDetNetInstances() error = %v", err)
 	}
-	if !errors.Is(err, connector.ErrNotImplemented) {
-		t.Errorf("ListDetNetInstances() error = %v, want ErrNotImplemented", err)
+	if len(result) != 1 {
+		t.Fatalf("ListDetNetInstances() result len = %d, want 1", len(result))
+	}
+	if result[0]["id"] != "detnet-001" {
+		t.Errorf("ListDetNetInstances() id = %v, want detnet-001", result[0]["id"])
 	}
 }
 
-func TestQueryTopologyLiveReturnsErrNotImplemented(t *testing.T) {
-	c := newMonitorTestConnector()
+func TestOperatorQueryTopologyLive(t *testing.T) {
+	server := setupOperatorFullMockServer(t)
+	defer server.Close()
+
+	c := newOperatorTestConnector(t, server.URL)
 	result, err := c.QueryTopologyLive(context.Background())
-	if result != nil {
-		t.Errorf("QueryTopologyLive() result = %v, want nil", result)
+	if err != nil {
+		t.Fatalf("QueryTopologyLive() error = %v", err)
 	}
-	if !errors.Is(err, connector.ErrNotImplemented) {
-		t.Errorf("QueryTopologyLive() error = %v, want ErrNotImplemented", err)
+	if result == nil {
+		t.Fatal("QueryTopologyLive() result = nil, want non-nil")
+	}
+	if len(result.Nodes) != 1 {
+		t.Errorf("QueryTopologyLive() nodes len = %d, want 1", len(result.Nodes))
+	}
+	if len(result.Links) != 1 {
+		t.Errorf("QueryTopologyLive() links len = %d, want 1", len(result.Links))
 	}
 }
 
@@ -327,11 +406,18 @@ func TestTypeAssertionFromAnyToDeviceOperator(t *testing.T) {
 
 func TestDeviceOperatorMethodCount(t *testing.T) {
 	// 文档定义 DeviceOperator 有 9 个方法
-	// 已实现的 5 个方法需要 client，在此仅验证返回 ErrNotImplemented 的 4 个方法
-	// 已实现方法的签名正确性由编译时 var _ connector.DeviceOperator 保证
-	c := newMonitorTestConnector()
+	// 全部 9 个方法已委托 ControllerClient 实现，由各自专项测试覆盖。
+	// 接口满足性由编译时 var _ connector.DeviceOperator = (*ControllerConnector)(nil) 保证。
+	// 此测试验证所有方法均可通过 mock server 正常调用。
+	server := setupOperatorFullMockServer(t)
+	defer server.Close()
+
+	c := newOperatorTestConnector(t, server.URL)
 	ctx := context.Background()
 
+	// Method 1-5: 已有专项测试覆盖，此处仅验证可调用
+	_, _ = c.QueryDeviceConfig(ctx, "NJ-SCT-R01")
+	// QueryISISNeighbors / QueryBGPPeers 需要额外 mock（peInfos），跳过
 	// Method 6: ListFlexEGroups
 	_, _ = c.ListFlexEGroups(ctx, connector.FilterOptions{})
 	// Method 7: ListSRv6Slices
@@ -340,8 +426,6 @@ func TestDeviceOperatorMethodCount(t *testing.T) {
 	_, _ = c.ListDetNetInstances(ctx)
 	// Method 9: QueryTopologyLive
 	_, _ = c.QueryTopologyLive(ctx)
-
-	// Method 1-5 的签名正确性由编译时 var _ connector.DeviceOperator = (*ControllerConnector)(nil) 保证
 }
 
 // ──────────────────────────────

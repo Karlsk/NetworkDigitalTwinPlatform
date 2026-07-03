@@ -1,6 +1,7 @@
 // Package controller 实现 Controller Connector，对接网络控制器 REST API。
 // operator.go 实现 DeviceOperator 能力接口，提供设备操作与配置查询能力。
-// V1.2-02: 已实现方法委托 ControllerClient，未实现方法返回 ErrNotImplemented（V1.2-04 补充）。
+// V1.2-02: 已实现方法委托 ControllerClient，未实现方法返回 ErrNotImplemented。
+// V1.2-04: 全部 9 个方法均已实现，委托给 ControllerClient。
 package controller
 
 import (
@@ -114,38 +115,38 @@ func (c *ControllerConnector) QueryGlobalRoute(
 
 // ListFlexEGroups 查询 FlexE Group 列表。
 // API: GET /api/no/config/terra-flexe:flexe/flexe-group
-// V1.2-04 实现。
+// V1.2-04: 委托 ControllerClient.ListFlexEGroups()。
 func (c *ControllerConnector) ListFlexEGroups(
-	_ context.Context, _ connector.FilterOptions,
+	ctx context.Context, opts connector.FilterOptions,
 ) ([]map[string]any, error) {
-	return nil, connector.ErrNotImplemented
+	return c.client.ListFlexEGroups(ctx, opts.DeviceName, opts.DstDeviceName)
 }
 
 // ListSRv6Slices 查询 SRv6 网络切片列表。
 // API: GET /api/no/config/terra-slicing:srv6-network-slices/srv6-network-slice
-// V1.2-04 实现。
+// V1.2-04: 委托 ControllerClient.ListSRv6Slices()。
 func (c *ControllerConnector) ListSRv6Slices(
-	_ context.Context, _ connector.FilterOptions,
+	ctx context.Context, opts connector.FilterOptions,
 ) ([]map[string]any, error) {
-	return nil, connector.ErrNotImplemented
+	return c.client.ListSRv6Slices(ctx, opts.SliceID, opts.DeviceName)
 }
 
 // ListDetNetInstances 查询确定性网络探测实例列表。
 // API: GET /api/no/config/terra-h3c-detnet/ip/service/all
-// V1.2-04 实现。
+// V1.2-04: 委托 ControllerClient.ListDetNetInstances()。
 func (c *ControllerConnector) ListDetNetInstances(
-	_ context.Context,
+	ctx context.Context,
 ) ([]map[string]any, error) {
-	return nil, connector.ErrNotImplemented
+	return c.client.ListDetNetInstances(ctx)
 }
 
 // QueryTopologyLive 查询实时拓扑视图（节点+链路），不依赖 Neo4j。
 // API: GET /api/sr/config/network-topology:network-topology
-// V1.2-04 实现。
+// V1.2-04: 委托 ControllerClient.FetchTopology()。
 func (c *ControllerConnector) QueryTopologyLive(
-	_ context.Context,
+	ctx context.Context,
 ) (*connector.TopologyLiveResult, error) {
-	return nil, connector.ErrNotImplemented
+	return c.client.FetchTopology(ctx)
 }
 
 // ──────────────────────────────

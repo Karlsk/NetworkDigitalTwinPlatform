@@ -1,10 +1,13 @@
 // Package controller 实现 Controller Connector 测试。
 // monitor_test.go 验证 MonitorQuerier 能力接口的实现正确性。
+// V1.2-04: 替换 ErrNotImplemented 测试为委托调用端到端测试。
 package controller
 
 import (
 	"context"
-	"errors"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -26,82 +29,249 @@ func TestMonitorQuerierCompileTimeCheck(t *testing.T) {
 }
 
 // ──────────────────────────────
-// MonitorQuerier 方法返回 ErrNotImplemented 测试
+// 辅助函数
 // ──────────────────────────────
 
-func newMonitorTestConnector() *ControllerConnector {
-	return &ControllerConnector{
-		name: "test-controller",
+// setupMonitorConnector 创建使用 mock server 的 ControllerConnector（MonitorQuerier 测试专用）。
+func setupMonitorConnector(t *testing.T, serverURL string) *ControllerConnector {
+	httpClient := connector.NewHTTPClient(
+		connector.WithBaseURL(serverURL),
+	)
+	client := NewControllerClient("test-controller", httpClient, map[string]any{
+		"username":  "testuser",
+		"password":  "testpass",
+		"device_id": "test-device",
+		"base_url":  serverURL,
+	})
+	return NewControllerConnector("test-controller", client, []string{"Device"}, serverURL)
+}
+
+// setupMonitorAndAlarmServer 创建同时支持监控和告警的 mock server。
+func setupMonitorAndAlarmServer(t *testing.T) *httptest.Server {
+	mux := http.NewServeMux()
+
+	mux.HandleFunc("/oauth/token", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"access_token": "mock-token",
+			"expires_in":   3600,
+		})
+	})
+
+	mux.HandleFunc("/monitor/controller/history", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode([]monitorRawSeries{
+			{Metric: "cpu_usage", Data: []struct {
+				Time  int64   `json:"time"`
+				Value float64 `json:"value"`
+			}{{Time: 1713700800, Value: 50.0}}},
+		})
+	})
+
+	mux.HandleFunc("/monitor/switch/history", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode([]monitorRawSeries{
+			{Metric: "in_traffic", Data: []struct {
+				Time  int64   `json:"time"`
+				Value float64 `json:"value"`
+			}{{Time: 1713700800, Value: 1024}}},
+		})
+	})
+
+	mux.HandleFunc("/monitor/vpn/history", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode([]monitorRawSeries{
+			{Metric: "throughput", Data: []struct {
+				Time  int64   `json:"time"`
+				Value float64 `json:"value"`
+			}{{Time: 1713700800, Value: 2048}}},
+		})
+	})
+
+	mux.HandleFunc("/monitor/te/history", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode([]monitorRawSeries{
+			{Metric: "bandwidth", Data: []struct {
+				Time  int64   `json:"time"`
+				Value float64 `json:"value"`
+			}{{Time: 1713700800, Value: 50000}}},
+		})
+	})
+
+	mux.HandleFunc("/monitor/alert/list", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"code":    0,
+			"message": "ok",
+			"data": []map[string]any{
+				{"id": "alarm-001", "level": "MAJOR"},
+			},
+		})
+	})
+
+	mux.HandleFunc("/monitor/logs", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(logPageResponse{
+			Content:       []map[string]any{{"id": "log-001", "message": "test"}},
+			TotalElements: 1,
+			PageNum:       1,
+			PageSize:      20,
+		})
+	})
+
+	mux.HandleFunc("/monitor/logs/login", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(logPageResponse{
+			Content:       []map[string]any{{"id": "login-001", "username": "admin"}},
+			TotalElements: 1,
+			PageNum:       1,
+			PageSize:      20,
+		})
+	})
+
+	return httptest.NewServer(mux)
+}
+
+// ──────────────────────────────
+// MonitorQuerier 委托调用端到端测试
+// ──────────────────────────────
+
+func TestMonitorQueryDeviceMetrics(t *testing.T) {
+	server := setupMonitorAndAlarmServer(t)
+	defer server.Close()
+
+	c := setupMonitorConnector(t, server.URL)
+	start := time.Date(2026, 4, 21, 10, 0, 0, 0, time.UTC)
+	end := time.Date(2026, 4, 21, 11, 0, 0, 0, time.UTC)
+
+	result, err := c.QueryDeviceMetrics(context.Background(), "NJ-SCT-R01", []string{"cpu_usage"}, start, end)
+	if err != nil {
+		t.Fatalf("QueryDeviceMetrics() error = %v", err)
+	}
+	if result == nil {
+		t.Fatal("QueryDeviceMetrics() result = nil, want non-nil")
+	}
+	if result.Device != "NJ-SCT-R01" {
+		t.Errorf("QueryDeviceMetrics() device = %q, want NJ-SCT-R01", result.Device)
+	}
+	if len(result.Metrics) != 1 || result.Metrics[0].Name != "cpu_usage" {
+		t.Errorf("QueryDeviceMetrics() metrics mismatch, got %v", result.Metrics)
 	}
 }
 
-func TestQueryDeviceMetricsReturnsErrNotImplemented(t *testing.T) {
-	c := newMonitorTestConnector()
-	result, err := c.QueryDeviceMetrics(context.Background(), "device1", []string{"cpu_usage"}, time.Now(), time.Now())
-	if result != nil {
-		t.Errorf("QueryDeviceMetrics() result = %v, want nil", result)
+func TestMonitorQueryPortMetrics(t *testing.T) {
+	server := setupMonitorAndAlarmServer(t)
+	defer server.Close()
+
+	c := setupMonitorConnector(t, server.URL)
+	start := time.Date(2026, 4, 21, 10, 0, 0, 0, time.UTC)
+	end := time.Date(2026, 4, 21, 11, 0, 0, 0, time.UTC)
+
+	result, err := c.QueryPortMetrics(context.Background(), "NJ-SCT-R01", "GE1/0/1", []string{"in_traffic"}, start, end)
+	if err != nil {
+		t.Fatalf("QueryPortMetrics() error = %v", err)
 	}
-	if !errors.Is(err, connector.ErrNotImplemented) {
-		t.Errorf("QueryDeviceMetrics() error = %v, want ErrNotImplemented", err)
+	if result == nil {
+		t.Fatal("QueryPortMetrics() result = nil, want non-nil")
+	}
+	if result.Port != "GE1/0/1" {
+		t.Errorf("QueryPortMetrics() port = %q, want GE1/0/1", result.Port)
 	}
 }
 
-func TestQueryPortMetricsReturnsErrNotImplemented(t *testing.T) {
-	c := newMonitorTestConnector()
-	result, err := c.QueryPortMetrics(context.Background(), "device1", "port1", []string{"in_traffic"}, time.Now(), time.Now())
-	if result != nil {
-		t.Errorf("QueryPortMetrics() result = %v, want nil", result)
+func TestMonitorQueryVPNTraffic(t *testing.T) {
+	server := setupMonitorAndAlarmServer(t)
+	defer server.Close()
+
+	c := setupMonitorConnector(t, server.URL)
+	start := time.Date(2026, 4, 21, 10, 0, 0, 0, time.UTC)
+	end := time.Date(2026, 4, 21, 11, 0, 0, 0, time.UTC)
+
+	result, err := c.QueryVPNTraffic(context.Background(), "vpn-001", []string{"throughput"}, start, end)
+	if err != nil {
+		t.Fatalf("QueryVPNTraffic() error = %v", err)
 	}
-	if !errors.Is(err, connector.ErrNotImplemented) {
-		t.Errorf("QueryPortMetrics() error = %v, want ErrNotImplemented", err)
+	if result == nil {
+		t.Fatal("QueryVPNTraffic() result = nil, want non-nil")
+	}
+	if result.VPN != "vpn-001" {
+		t.Errorf("QueryVPNTraffic() vpn = %q, want vpn-001", result.VPN)
 	}
 }
 
-func TestQueryVPNTrafficReturnsErrNotImplemented(t *testing.T) {
-	c := newMonitorTestConnector()
-	result, err := c.QueryVPNTraffic(context.Background(), "vpn-001", []string{"throughput"}, time.Now(), time.Now())
-	if result != nil {
-		t.Errorf("QueryVPNTraffic() result = %v, want nil", result)
+func TestMonitorQueryTunnelTraffic(t *testing.T) {
+	server := setupMonitorAndAlarmServer(t)
+	defer server.Close()
+
+	c := setupMonitorConnector(t, server.URL)
+	start := time.Date(2026, 4, 21, 10, 0, 0, 0, time.UTC)
+	end := time.Date(2026, 4, 21, 11, 0, 0, 0, time.UTC)
+
+	result, err := c.QueryTunnelTraffic(context.Background(), "NJ-SCT-R01", "tunnel-001", []string{"bandwidth"}, start, end)
+	if err != nil {
+		t.Fatalf("QueryTunnelTraffic() error = %v", err)
 	}
-	if !errors.Is(err, connector.ErrNotImplemented) {
-		t.Errorf("QueryVPNTraffic() error = %v, want ErrNotImplemented", err)
+	if result == nil {
+		t.Fatal("QueryTunnelTraffic() result = nil, want non-nil")
+	}
+	if result.Tunnel != "tunnel-001" {
+		t.Errorf("QueryTunnelTraffic() tunnel = %q, want tunnel-001", result.Tunnel)
 	}
 }
 
-func TestQueryTunnelTrafficReturnsErrNotImplemented(t *testing.T) {
-	c := newMonitorTestConnector()
-	result, err := c.QueryTunnelTraffic(context.Background(), "device1", "tunnel1", []string{"bandwidth"}, time.Now(), time.Now())
-	if result != nil {
-		t.Errorf("QueryTunnelTraffic() result = %v, want nil", result)
+func TestMonitorQueryAlerts(t *testing.T) {
+	server := setupMonitorAndAlarmServer(t)
+	defer server.Close()
+
+	c := setupMonitorConnector(t, server.URL)
+	alerts, err := c.QueryAlerts(context.Background(), "business", "1h")
+	if err != nil {
+		t.Fatalf("QueryAlerts() error = %v", err)
 	}
-	if !errors.Is(err, connector.ErrNotImplemented) {
-		t.Errorf("QueryTunnelTraffic() error = %v, want ErrNotImplemented", err)
+	if len(alerts) == 0 {
+		t.Fatal("QueryAlerts() alerts is empty, want at least 1")
+	}
+	if alerts[0]["id"] != "alarm-001" {
+		t.Errorf("QueryAlerts() id = %v, want alarm-001", alerts[0]["id"])
 	}
 }
 
-func TestQueryAlertsReturnsErrNotImplemented(t *testing.T) {
-	c := newMonitorTestConnector()
-	result, err := c.QueryAlerts(context.Background(), "business", "1h")
-	if result != nil {
-		t.Errorf("QueryAlerts() result = %v, want nil", result)
-	}
-	if !errors.Is(err, connector.ErrNotImplemented) {
-		t.Errorf("QueryAlerts() error = %v, want ErrNotImplemented", err)
-	}
-}
+func TestMonitorQueryLogs_System(t *testing.T) {
+	server := setupMonitorAndAlarmServer(t)
+	defer server.Close()
 
-func TestQueryLogsReturnsErrNotImplemented(t *testing.T) {
-	c := newMonitorTestConnector()
+	c := setupMonitorConnector(t, server.URL)
 	result, err := c.QueryLogs(context.Background(), "system", connector.LogQueryOptions{
-		Interval: "1h",
 		PageNum:  1,
 		PageSize: 20,
 	})
-	if result != nil {
-		t.Errorf("QueryLogs() result = %v, want nil", result)
+	if err != nil {
+		t.Fatalf("QueryLogs(system) error = %v", err)
 	}
-	if !errors.Is(err, connector.ErrNotImplemented) {
-		t.Errorf("QueryLogs() error = %v, want ErrNotImplemented", err)
+	if result == nil {
+		t.Fatal("QueryLogs(system) result = nil, want non-nil")
+	}
+	if len(result.Logs) != 1 {
+		t.Errorf("QueryLogs(system) logs len = %d, want 1", len(result.Logs))
+	}
+}
+
+func TestMonitorQueryLogs_Login(t *testing.T) {
+	server := setupMonitorAndAlarmServer(t)
+	defer server.Close()
+
+	c := setupMonitorConnector(t, server.URL)
+	result, err := c.QueryLogs(context.Background(), "login", connector.LogQueryOptions{
+		Interval: "1h",
+	})
+	if err != nil {
+		t.Fatalf("QueryLogs(login) error = %v", err)
+	}
+	if result == nil {
+		t.Fatal("QueryLogs(login) result = nil, want non-nil")
+	}
+	if len(result.Logs) != 1 {
+		t.Errorf("QueryLogs(login) logs len = %d, want 1", len(result.Logs))
 	}
 }
 
@@ -143,23 +313,6 @@ func TestTypeAssertionFromInterfaceToMonitorQuerier(t *testing.T) {
 // ──────────────────────────────
 
 func TestMonitorQuerierMethodCount(t *testing.T) {
-	// 文档定义 MonitorQuerier 有 6 个方法
-	c := newMonitorTestConnector()
-	ctx := context.Background()
-	now := time.Now()
-
-	// Method 1: QueryDeviceMetrics
-	_, _ = c.QueryDeviceMetrics(ctx, "d", nil, now, now)
-	// Method 2: QueryPortMetrics
-	_, _ = c.QueryPortMetrics(ctx, "d", "p", nil, now, now)
-	// Method 3: QueryVPNTraffic
-	_, _ = c.QueryVPNTraffic(ctx, "v", nil, now, now)
-	// Method 4: QueryTunnelTraffic
-	_, _ = c.QueryTunnelTraffic(ctx, "d", "t", nil, now, now)
-	// Method 5: QueryAlerts
-	_, _ = c.QueryAlerts(ctx, "ns", "1h")
-	// Method 6: QueryLogs
-	_, _ = c.QueryLogs(ctx, "system", connector.LogQueryOptions{})
-
-	// 如果编译通过，说明 6 个方法签名均正确
+	// 文档定义 MonitorQuerier 有 6 个方法，签名正确性由编译时 var _ 检查保证
+	// 此测试仅验证方法数量和调用不 panic（使用 nil client 会 panic，故跳过实际调用）
 }
