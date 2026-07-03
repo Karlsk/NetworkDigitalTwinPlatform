@@ -73,6 +73,23 @@ func (m *mockSyncService) FullSync(_ context.Context) (*service.SyncResult, erro
 	return m.fullSyncResult, m.fullSyncErr
 }
 
+// mockDeviceService 实现 deviceService 接口。
+type mockDeviceService struct {
+	monitorResult any
+	monitorErr    error
+	deviceResult  any
+	deviceErr     error
+}
+
+var _ deviceService = (*mockDeviceService)(nil)
+
+func (m *mockDeviceService) QueryMonitor(_ context.Context, _ service.MonitorRequest) (any, error) {
+	return m.monitorResult, m.monitorErr
+}
+func (m *mockDeviceService) QueryDeviceInfo(_ context.Context, _ service.DeviceInfoRequest) (any, error) {
+	return m.deviceResult, m.deviceErr
+}
+
 // ---------------------------------------------------------------------------
 // 测试辅助
 // ---------------------------------------------------------------------------
@@ -116,7 +133,7 @@ func newTestServer(t *testing.T, h *toolHandlers) *mcpsdk.ClientSession {
 }
 
 // ---------------------------------------------------------------------------
-// TC-M01: ListTools — 返回 4 个工具，名称正确
+// TC-M01: ListTools — 返回 7 个工具，名称正确
 // ---------------------------------------------------------------------------
 
 func TestListTools(t *testing.T) {
@@ -124,6 +141,7 @@ func TestListTools(t *testing.T) {
 		analysisSvc: &mockAnalysisService{},
 		snapshotSvc: &mockSnapshotService{},
 		syncSvc:     &mockSyncService{},
+		deviceSvc:   &mockDeviceService{},
 	}
 	cs := newTestServer(t, h)
 
@@ -133,15 +151,18 @@ func TestListTools(t *testing.T) {
 		t.Fatalf("ListTools() error = %v", err)
 	}
 
-	if len(res.Tools) != 4 {
-		t.Fatalf("ListTools() returned %d tools, want 4", len(res.Tools))
+	if len(res.Tools) != 7 {
+		t.Fatalf("ListTools() returned %d tools, want 7", len(res.Tools))
 	}
 
 	wantNames := map[string]bool{
-		"query_topology":   false,
-		"query_snapshot":   false,
-		"sync_data":        false,
-		"restore_snapshot": false,
+		"query_topology":    false,
+		"query_snapshot":    false,
+		"sync_data":         false,
+		"restore_snapshot":  false,
+		"query_monitor":     false,
+		"query_device_info": false,
+		"query_topology_live": false,
 	}
 	for _, tool := range res.Tools {
 		if _, ok := wantNames[tool.Name]; ok {
@@ -174,6 +195,7 @@ func TestQueryTopology(t *testing.T) {
 		analysisSvc: &mockAnalysisService{queryResult: mockResult},
 		snapshotSvc: &mockSnapshotService{},
 		syncSvc:     &mockSyncService{},
+		deviceSvc:   &mockDeviceService{},
 	}
 	cs := newTestServer(t, h)
 
@@ -213,6 +235,7 @@ func TestQuerySnapshotList(t *testing.T) {
 		analysisSvc: &mockAnalysisService{},
 		snapshotSvc: &mockSnapshotService{listResult: metas},
 		syncSvc:     &mockSyncService{},
+		deviceSvc:   &mockDeviceService{},
 	}
 	cs := newTestServer(t, h)
 
@@ -252,6 +275,7 @@ func TestSyncDataFull(t *testing.T) {
 		analysisSvc: &mockAnalysisService{},
 		snapshotSvc: &mockSnapshotService{},
 		syncSvc:     &mockSyncService{fullSyncResult: mockResult},
+		deviceSvc:   &mockDeviceService{},
 	}
 	cs := newTestServer(t, h)
 
@@ -287,6 +311,7 @@ func TestRestoreSnapshot(t *testing.T) {
 		analysisSvc: &mockAnalysisService{},
 		snapshotSvc: mockSvc,
 		syncSvc:     &mockSyncService{},
+		deviceSvc:   &mockDeviceService{},
 	}
 	cs := newTestServer(t, h)
 
@@ -321,6 +346,7 @@ func TestToolInvalidParams(t *testing.T) {
 		analysisSvc: &mockAnalysisService{},
 		snapshotSvc: &mockSnapshotService{},
 		syncSvc:     &mockSyncService{},
+		deviceSvc:   &mockDeviceService{},
 	}
 	cs := newTestServer(t, h)
 
@@ -346,6 +372,7 @@ func TestCallNonExistentTool(t *testing.T) {
 		analysisSvc: &mockAnalysisService{},
 		snapshotSvc: &mockSnapshotService{},
 		syncSvc:     &mockSyncService{},
+		deviceSvc:   &mockDeviceService{},
 	}
 	cs := newTestServer(t, h)
 
@@ -376,6 +403,7 @@ func TestQuerySnapshotDiff(t *testing.T) {
 		analysisSvc: &mockAnalysisService{},
 		snapshotSvc: &mockSnapshotService{diffResult: mockDiff},
 		syncSvc:     &mockSyncService{},
+		deviceSvc:   &mockDeviceService{},
 	}
 	cs := newTestServer(t, h)
 
@@ -416,6 +444,7 @@ func TestQueryTopologyError(t *testing.T) {
 		analysisSvc: &mockAnalysisService{queryErr: errors.New("neo4j timeout")},
 		snapshotSvc: &mockSnapshotService{},
 		syncSvc:     &mockSyncService{},
+		deviceSvc:   &mockDeviceService{},
 	}
 	cs := newTestServer(t, h)
 
@@ -441,6 +470,7 @@ func TestSyncDataError(t *testing.T) {
 		analysisSvc: &mockAnalysisService{},
 		snapshotSvc: &mockSnapshotService{},
 		syncSvc:     &mockSyncService{fullSyncErr: errors.New("sync failed")},
+		deviceSvc:   &mockDeviceService{},
 	}
 	cs := newTestServer(t, h)
 
@@ -479,6 +509,7 @@ func TestQuerySnapshotDiff_ChangedStats(t *testing.T) {
 		analysisSvc: &mockAnalysisService{},
 		snapshotSvc: &mockSnapshotService{diffResult: mockDiff},
 		syncSvc:     &mockSyncService{},
+		deviceSvc:   &mockDeviceService{},
 	}
 	cs := newTestServer(t, h)
 
@@ -512,6 +543,7 @@ func TestQuerySnapshotListError(t *testing.T) {
 		analysisSvc: &mockAnalysisService{},
 		snapshotSvc: &mockSnapshotService{listErr: errors.New("filesystem error")},
 		syncSvc:     &mockSyncService{},
+		deviceSvc:   &mockDeviceService{},
 	}
 	cs := newTestServer(t, h)
 
@@ -525,5 +557,202 @@ func TestQuerySnapshotListError(t *testing.T) {
 	}
 	if !res.IsError {
 		t.Error("expected IsError=true for list snapshot error")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// TC-M12: query_monitor — 正向调用
+// ---------------------------------------------------------------------------
+
+func TestQueryMonitor(t *testing.T) {
+	mockMetrics := map[string]any{"device": "router-01", "metrics": []any{map[string]any{"name": "cpu_usage"}}}
+	h := &toolHandlers{
+		analysisSvc: &mockAnalysisService{},
+		snapshotSvc: &mockSnapshotService{},
+		syncSvc:     &mockSyncService{},
+		deviceSvc:   &mockDeviceService{monitorResult: mockMetrics},
+	}
+	cs := newTestServer(t, h)
+
+	ctx := context.Background()
+	res, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name:      "query_monitor",
+		Arguments: map[string]any{"connector_name": "ctrl", "query_type": "device", "device": "router-01", "metrics": []any{"cpu_usage"}},
+	})
+	if err != nil {
+		t.Fatalf("CallTool(query_monitor) error = %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("CallTool(query_monitor) IsError=true, content=%v", res.Content)
+	}
+	if res.StructuredContent == nil {
+		t.Error("StructuredContent is nil")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// TC-M13: query_monitor — 错误路径
+// ---------------------------------------------------------------------------
+
+func TestQueryMonitorError(t *testing.T) {
+	h := &toolHandlers{
+		analysisSvc: &mockAnalysisService{},
+		snapshotSvc: &mockSnapshotService{},
+		syncSvc:     &mockSyncService{},
+		deviceSvc:   &mockDeviceService{monitorErr: errors.New("connector unavailable")},
+	}
+	cs := newTestServer(t, h)
+
+	ctx := context.Background()
+	res, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name:      "query_monitor",
+		Arguments: map[string]any{"connector_name": "ctrl", "query_type": "device"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool(query_monitor) error = %v", err)
+	}
+	if !res.IsError {
+		t.Error("expected IsError=true for query monitor error")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// TC-M13b: query_monitor — 时间解析错误
+// ---------------------------------------------------------------------------
+
+func TestQueryMonitorInvalidTime(t *testing.T) {
+	h := &toolHandlers{
+		analysisSvc: &mockAnalysisService{},
+		snapshotSvc: &mockSnapshotService{},
+		syncSvc:     &mockSyncService{},
+		deviceSvc:   &mockDeviceService{},
+	}
+	cs := newTestServer(t, h)
+
+	ctx := context.Background()
+	res, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name:      "query_monitor",
+		Arguments: map[string]any{"connector_name": "ctrl", "query_type": "device", "start_time": "not-a-time"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool(query_monitor) error = %v", err)
+	}
+	if !res.IsError {
+		t.Error("expected IsError=true for invalid start_time")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// TC-M14: query_device_info — 正向调用
+// ---------------------------------------------------------------------------
+
+func TestQueryDeviceInfo(t *testing.T) {
+	mockConfig := map[string]any{"config": "hostname router-01", "device": "router-01"}
+	h := &toolHandlers{
+		analysisSvc: &mockAnalysisService{},
+		snapshotSvc: &mockSnapshotService{},
+		syncSvc:     &mockSyncService{},
+		deviceSvc:   &mockDeviceService{deviceResult: mockConfig},
+	}
+	cs := newTestServer(t, h)
+
+	ctx := context.Background()
+	res, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name:      "query_device_info",
+		Arguments: map[string]any{"connector_name": "ctrl", "query_type": "config", "device": "router-01"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool(query_device_info) error = %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("CallTool(query_device_info) IsError=true, content=%v", res.Content)
+	}
+	if res.StructuredContent == nil {
+		t.Error("StructuredContent is nil")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// TC-M15: query_device_info — 错误路径
+// ---------------------------------------------------------------------------
+
+func TestQueryDeviceInfoError(t *testing.T) {
+	h := &toolHandlers{
+		analysisSvc: &mockAnalysisService{},
+		snapshotSvc: &mockSnapshotService{},
+		syncSvc:     &mockSyncService{},
+		deviceSvc:   &mockDeviceService{deviceErr: errors.New("device unreachable")},
+	}
+	cs := newTestServer(t, h)
+
+	ctx := context.Background()
+	res, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name:      "query_device_info",
+		Arguments: map[string]any{"connector_name": "ctrl", "query_type": "config", "device": "router-01"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool(query_device_info) error = %v", err)
+	}
+	if !res.IsError {
+		t.Error("expected IsError=true for query device info error")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// TC-M16: query_topology_live — 正向调用
+// ---------------------------------------------------------------------------
+
+func TestQueryTopologyLive(t *testing.T) {
+	mockTopology := map[string]any{
+		"nodes": []any{map[string]any{"id": "r1"}, map[string]any{"id": "r2"}},
+		"links": []any{map[string]any{"from": "r1", "to": "r2"}},
+	}
+	h := &toolHandlers{
+		analysisSvc: &mockAnalysisService{},
+		snapshotSvc: &mockSnapshotService{},
+		syncSvc:     &mockSyncService{},
+		deviceSvc:   &mockDeviceService{deviceResult: mockTopology},
+	}
+	cs := newTestServer(t, h)
+
+	ctx := context.Background()
+	res, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name:      "query_topology_live",
+		Arguments: map[string]any{"connector_name": "ctrl"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool(query_topology_live) error = %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("CallTool(query_topology_live) IsError=true, content=%v", res.Content)
+	}
+	if res.StructuredContent == nil {
+		t.Error("StructuredContent is nil")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// TC-M17: query_topology_live — 错误路径
+// ---------------------------------------------------------------------------
+
+func TestQueryTopologyLiveError(t *testing.T) {
+	h := &toolHandlers{
+		analysisSvc: &mockAnalysisService{},
+		snapshotSvc: &mockSnapshotService{},
+		syncSvc:     &mockSyncService{},
+		deviceSvc:   &mockDeviceService{deviceErr: errors.New("controller timeout")},
+	}
+	cs := newTestServer(t, h)
+
+	ctx := context.Background()
+	res, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name:      "query_topology_live",
+		Arguments: map[string]any{"connector_name": "ctrl"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool(query_topology_live) error = %v", err)
+	}
+	if !res.IsError {
+		t.Error("expected IsError=true for query topology live error")
 	}
 }

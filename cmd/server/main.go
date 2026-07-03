@@ -91,14 +91,17 @@ func main() {
 	analysisSvc := service.NewAnalysisService(gdb, lock)
 	snapshotSvc := service.NewSnapshotService(snapMgr)
 
-	// 9. 构建 MCP Server 并注册工具
-	mcpServer := intmcp.NewNetworkTwinServer(analysisSvc, snapshotSvc, syncSvc)
+	// 9. 初始化 DeviceService（只读，不需要 GraphLock）
+	deviceSvc := service.NewDeviceService(connRegistry)
 
-	// 10. Graceful shutdown
+	// 10. 构建 MCP Server 并注册工具
+	mcpServer := intmcp.NewNetworkTwinServer(analysisSvc, snapshotSvc, syncSvc, deviceSvc)
+
+	// 11. Graceful shutdown
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	// 11. 启动 Streamable HTTP MCP Server
+	// 12. 启动 Streamable HTTP MCP Server
 	addr := fmt.Sprintf(":%d", cfg.Server.Port)
 	if err := intmcp.RunHTTP(ctx, mcpServer, addr); err != nil {
 		slog.Error("MCP server error", "error", err)

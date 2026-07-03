@@ -37,6 +37,12 @@ type syncService interface {
 	FullSync(ctx context.Context) (*service.SyncResult, error)
 }
 
+// deviceService 封装设备操作服务，由 *service.DeviceService 隐式满足。
+type deviceService interface {
+	QueryMonitor(ctx context.Context, req service.MonitorRequest) (any, error)
+	QueryDeviceInfo(ctx context.Context, req service.DeviceInfoRequest) (any, error)
+}
+
 // ---------------------------------------------------------------------------
 // toolHandlers — 持有依赖，每个方法对应一个 MCP 工具 handler
 // ---------------------------------------------------------------------------
@@ -46,6 +52,7 @@ type toolHandlers struct {
 	analysisSvc analysisService
 	snapshotSvc snapshotService
 	syncSvc     syncService
+	deviceSvc   deviceService
 }
 
 // ---------------------------------------------------------------------------
@@ -248,6 +255,117 @@ type RestoreSnapshotInput struct {
 // RestoreSnapshotOutput 定义 restore_snapshot 工具的结构化输出。
 type RestoreSnapshotOutput struct {
 	Message string `json:"message"`
+}
+
+// ---------------------------------------------------------------------------
+// query_monitor — 只读，查询监控指标/告警/日志
+// ---------------------------------------------------------------------------
+
+// QueryMonitorInput 定义 query_monitor 工具的输入参数。
+type QueryMonitorInput struct {
+	ConnectorName string   `json:"connector_name" jsonschema:"目标 Connector 名称"`
+	QueryType     string   `json:"query_type" jsonschema:"查询类型: device/port/vpn/tunnel/alerts/logs"`
+	Device        string   `json:"device,omitempty" jsonschema:"设备名称"`
+	Port          string   `json:"port,omitempty" jsonschema:"端口名称"`
+	VPNID         string   `json:"vpn_id,omitempty" jsonschema:"VPN ID"`
+	Tunnel        string   `json:"tunnel,omitempty" jsonschema:"隧道名称"`
+	Metrics       []string `json:"metrics,omitempty" jsonschema:"指标名列表"`
+	Namespace     string   `json:"namespace,omitempty" jsonschema:"告警命名空间"`
+	Interval      string   `json:"interval,omitempty" jsonschema:"时间区间（如 1h, 24h）"`
+	StartTime     string   `json:"start_time,omitempty" jsonschema:"起始时间 (RFC3339)"`
+	EndTime       string   `json:"end_time,omitempty" jsonschema:"结束时间 (RFC3339)"`
+	LogType       string   `json:"log_type,omitempty" jsonschema:"日志类型: system/login"`
+}
+
+// handleQueryMonitor 查询设备/端口/VPN/隧道的监控指标或告警/日志。
+func (h *toolHandlers) handleQueryMonitor(
+	ctx context.Context, _ *mcpsdk.CallToolRequest, in QueryMonitorInput,
+) (*mcpsdk.CallToolResult, any, error) {
+	req := service.MonitorRequest{
+		ConnectorName: in.ConnectorName,
+		QueryType:     in.QueryType,
+		Device:        in.Device,
+		Port:          in.Port,
+		VPNID:         in.VPNID,
+		Tunnel:        in.Tunnel,
+		Metrics:       in.Metrics,
+		Namespace:     in.Namespace,
+		Interval:      in.Interval,
+		LogType:       in.LogType,
+	}
+	// 解析时间
+	if in.StartTime != "" {
+		t, err := time.Parse(time.RFC3339, in.StartTime)
+		if err != nil {
+			return nil, nil, fmt.Errorf("invalid start_time: %w", err)
+		}
+		req.StartTime = t
+	}
+	if in.EndTime != "" {
+		t, err := time.Parse(time.RFC3339, in.EndTime)
+		if err != nil {
+			return nil, nil, fmt.Errorf("invalid end_time: %w", err)
+		}
+		req.EndTime = t
+	}
+
+	result, err := h.deviceSvc.QueryMonitor(ctx, req)
+	if err != nil {
+		return nil, nil, fmt.Errorf("query monitor: %w", err)
+	}
+	slog.Info("query_monitor completed", "type", in.QueryType, "connector", in.ConnectorName)
+	return nil, result, nil
+}
+
+// ---------------------------------------------------------------------------
+// query_device_info — 只读，查询设备配置/邻居/切片/路由
+// ---------------------------------------------------------------------------
+
+// QueryDeviceInfoInput 定义 query_device_info 工具的输入参数。
+type QueryDeviceInfoInput struct {
+	ConnectorName string `json:"connector_name" jsonschema:"目标 Connector 名称"`
+	QueryType     string `json:"query_type" jsonschema:"查询类型: config/isis/bgp/vpn_config/route/topology/flexe/srv6/detnet"`
+	Device        string `json:"device,omitempty" jsonschema:"设备名称"`
+}
+
+// handleQueryDeviceInfo 查询设备实时配置、协议邻居、切片等信息。
+func (h *toolHandlers) handleQueryDeviceInfo(
+	ctx context.Context, _ *mcpsdk.CallToolRequest, in QueryDeviceInfoInput,
+) (*mcpsdk.CallToolResult, any, error) {
+	result, err := h.deviceSvc.QueryDeviceInfo(ctx, service.DeviceInfoRequest{
+		ConnectorName: in.ConnectorName,
+		QueryType:     in.QueryType,
+		Device:        in.Device,
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("query device info: %w", err)
+	}
+	slog.Info("query_device_info completed", "type", in.QueryType, "connector", in.ConnectorName)
+	return nil, result, nil
+}
+
+// ---------------------------------------------------------------------------
+// query_topology_live — 只读，查询实时拓扑（不依赖 Neo4j）
+// ---------------------------------------------------------------------------
+
+// QueryTopologyLiveInput 定义 query_topology_live 工具的输入参数。
+type QueryTopologyLiveInput struct {
+	ConnectorName string `json:"connector_name" jsonschema:"目标 Connector 名称"`
+}
+
+// handleQueryTopologyLive 查询实时网络拓扑视图，直接从控制器获取。
+func (h *toolHandlers) handleQueryTopologyLive(
+	ctx context.Context, _ *mcpsdk.CallToolRequest, in QueryTopologyLiveInput,
+) (*mcpsdk.CallToolResult, any, error) {
+	result, err := h.deviceSvc.QueryDeviceInfo(ctx, service.DeviceInfoRequest{
+		ConnectorName: in.ConnectorName,
+		QueryType:     "topology",
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("query topology live: %w", err)
+	}
+	slog.Info("query_topology_live completed", "connector", in.ConnectorName)
+	return nil, result, nil
 }
 
 // handleRestoreSnapshot 恢复快照到 default 逻辑 DB。
