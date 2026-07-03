@@ -13,6 +13,8 @@
 | 基础设施 | [`01-infrastructure/`](01-infrastructure/) | D-01~D-05, I-01~I-12, T-01~T-05 |
 | 数据引擎 | [`02-data-engine/`](02-data-engine/) | I-13~I-18, T-06~T-08 |
 | 智能系统 | [`03-intelligent-system/`](03-intelligent-system/) | V-01~V-04 |
+| V1 扩展 | [`04-v1/`](04-v1/) | V1-01~V1-22 |
+| V1.2 API 解耦 | [`05-v1.2/`](05-v1.2/) | V1.2-01~V1.2-04 |
 
 ---
 

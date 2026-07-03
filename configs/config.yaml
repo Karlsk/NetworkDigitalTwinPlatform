@@ -1,6 +1,6 @@
 # 服务全局配置
 neo4j:
-  uri: "bolt://localhost:7687"
+  uri: "bolt://172.17.1.224:7687"
   user: "neo4j"
   password: "password123"
   default_db: "neo4j"
