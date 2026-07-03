@@ -8,9 +8,44 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 )
+
+// decodeJSONList 解码 JSON 列表响应，兼容空 body（EOF）。
+// 服务端返回空 body 时返回空切片而非错误。
+func decodeJSONList(body io.ReadCloser) ([]map[string]any, error) {
+	rawBytes, err := io.ReadAll(body)
+	if err != nil {
+		return nil, fmt.Errorf("read list response: %w", err)
+	}
+	if len(rawBytes) == 0 {
+		return []map[string]any{}, nil
+	}
+	var result []map[string]any
+	if err := json.Unmarshal(rawBytes, &result); err != nil {
+		return nil, fmt.Errorf("decode list response: %w", err)
+	}
+	return result, nil
+}
+
+// decodeJSONMap 解码 JSON 对象响应，兼容空 body（EOF）。
+// 服务端返回空 body 时返回空 map 而非错误。
+func decodeJSONMap(body io.ReadCloser) (map[string]any, error) {
+	rawBytes, err := io.ReadAll(body)
+	if err != nil {
+		return nil, fmt.Errorf("read map response: %w", err)
+	}
+	if len(rawBytes) == 0 {
+		return map[string]any{}, nil
+	}
+	var result map[string]any
+	if err := json.Unmarshal(rawBytes, &result); err != nil {
+		return nil, fmt.Errorf("decode map response: %w", err)
+	}
+	return result, nil
+}
 
 // ──────────────────────────────
 // FlexE Group CRUD（文档 8.1-8.4）
@@ -38,9 +73,9 @@ func (c *ControllerClient) CreateFlexEGroup(ctx context.Context, body map[string
 		return nil, fmt.Errorf("create flexe group: status %d", resp.StatusCode)
 	}
 
-	var result map[string]any
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("decode create flexe group response: %w", err)
+	result, err := decodeJSONMap(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("create flexe group: %w", err)
 	}
 	return result, nil
 }
@@ -76,8 +111,9 @@ func (c *ControllerClient) ListFlexEGroups(ctx context.Context, device, dstDevic
 	}
 
 	var result []map[string]any
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("decode list flexe groups response: %w", err)
+	result, err = decodeJSONList(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("list flexe groups: %w", err)
 	}
 	return result, nil
 }
@@ -152,9 +188,9 @@ func (c *ControllerClient) CreateFlexEClient(ctx context.Context, body map[strin
 		return nil, fmt.Errorf("create flexe client: status %d", resp.StatusCode)
 	}
 
-	var result map[string]any
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("decode create flexe client response: %w", err)
+	result, err := decodeJSONMap(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("create flexe client: %w", err)
 	}
 	return result, nil
 }
@@ -178,8 +214,9 @@ func (c *ControllerClient) ListFlexEClients(ctx context.Context, groupID string)
 	}
 
 	var result []map[string]any
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("decode list flexe clients response: %w", err)
+	result, err = decodeJSONList(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("list flexe clients for group %s: %w", groupID, err)
 	}
 	return result, nil
 }
@@ -279,9 +316,9 @@ func (c *ControllerClient) CreateSubInterfaceSlicing(ctx context.Context, body m
 		return nil, fmt.Errorf("create sub-interface slicing: status %d", resp.StatusCode)
 	}
 
-	var result map[string]any
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("decode create sub-interface slicing response: %w", err)
+	result, err := decodeJSONMap(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("create sub-interface slicing: %w", err)
 	}
 	return result, nil
 }
@@ -317,8 +354,9 @@ func (c *ControllerClient) ListSubInterfaceSlicings(ctx context.Context, device,
 	}
 
 	var result []map[string]any
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("decode list sub-interface slicings response: %w", err)
+	result, err = decodeJSONList(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("list sub-interface slicings: %w", err)
 	}
 	return result, nil
 }
@@ -393,9 +431,9 @@ func (c *ControllerClient) CreateSRv6Slice(ctx context.Context, body map[string]
 		return nil, fmt.Errorf("create srv6 slice: status %d", resp.StatusCode)
 	}
 
-	var result map[string]any
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("decode create srv6 slice response: %w", err)
+	result, err := decodeJSONMap(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("create srv6 slice: %w", err)
 	}
 	return result, nil
 }
@@ -431,8 +469,9 @@ func (c *ControllerClient) ListSRv6Slices(ctx context.Context, sliceID, device s
 	}
 
 	var result []map[string]any
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("decode list srv6 slices response: %w", err)
+	result, err = decodeJSONList(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("list srv6 slices: %w", err)
 	}
 	return result, nil
 }

@@ -35,8 +35,9 @@ func (c *ControllerClient) ListDetNetInstances(
 	}
 
 	var result []map[string]any
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("decode list detnet instances response: %w", err)
+	result, err = decodeJSONList(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("list detnet instances: %w", err)
 	}
 	return result, nil
 }
@@ -65,9 +66,9 @@ func (c *ControllerClient) CreateDetNetInstance(
 		return nil, fmt.Errorf("create detnet instance: status %d", resp.StatusCode)
 	}
 
-	var result map[string]any
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("decode create detnet instance response: %w", err)
+	result, err := decodeJSONMap(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("create detnet instance: %w", err)
 	}
 	return result, nil
 }
@@ -146,8 +147,9 @@ func (c *ControllerClient) FetchDetNetOAMData(
 	}
 
 	var result []map[string]any
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("decode detnet oam data response: %w", err)
+	result, err = decodeJSONList(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("fetch detnet oam data for %s: %w", instanceID, err)
 	}
 	return result, nil
 }

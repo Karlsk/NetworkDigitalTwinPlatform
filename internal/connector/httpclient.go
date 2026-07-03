@@ -225,6 +225,7 @@ func (c *HTTPClient) Put(ctx context.Context, path string, body io.Reader) (*htt
 	if err != nil {
 		return nil, fmt.Errorf("create PUT request %s: %w", path, err)
 	}
+	req.Header.Set("Content-Type", "application/json")
 	return c.Do(ctx, req)
 }
 
@@ -234,6 +235,7 @@ func (c *HTTPClient) Delete(ctx context.Context, path string) (*http.Response, e
 	if err != nil {
 		return nil, fmt.Errorf("create DELETE request %s: %w", path, err)
 	}
+	req.Header.Set("Content-Type", "application/json")
 	return c.Do(ctx, req)
 }
 

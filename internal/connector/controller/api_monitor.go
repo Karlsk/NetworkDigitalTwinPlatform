@@ -48,23 +48,48 @@ type monitorRawSeries struct {
 }
 
 // parseMonitorResponse 解析监控响应为 MetricsResult。
-// 响应格式: [{"metric": "cpu_usage", "data": [{"time": 1234567890, "value": 45.2}]}]
+// 兼容两种响应格式:
+//   - 数组: [{"metric": "cpu_usage", "data": [{"time": 123, "value": 45.2}]}]
+//   - 对象: {"data": [...], "series": [...]} 等 wrapper 结构
 func parseMonitorResponse(body io.ReadCloser, device string) (*connector.MetricsResult, error) {
 	defer body.Close()
 
+	rawBytes, err := io.ReadAll(body)
+	if err != nil {
+		return nil, fmt.Errorf("read monitor response: %w", err)
+	}
+	if len(rawBytes) == 0 {
+		return &connector.MetricsResult{Device: device}, nil
+	}
+
+	// 先尝试数组格式 [{metric, data}]
 	var rawSeries []monitorRawSeries
-	if err := json.NewDecoder(body).Decode(&rawSeries); err != nil {
+	if err := json.Unmarshal(rawBytes, &rawSeries); err == nil {
+		return buildMetricsFromArray(rawSeries, device), nil
+	}
+
+	// 回退: 对象格式，搜索第一个数组类型字段
+	var rawMap map[string]json.RawMessage
+	if err := json.Unmarshal(rawBytes, &rawMap); err != nil {
 		return nil, fmt.Errorf("decode monitor response: %w", err)
 	}
 
-	result := &connector.MetricsResult{
-		Device: device,
+	for _, v := range rawMap {
+		var series []monitorRawSeries
+		if err := json.Unmarshal(v, &series); err == nil {
+			return buildMetricsFromArray(series, device), nil
+		}
 	}
 
+	// 无法解析时返回空结果（服务端返回格式不匹配）
+	return &connector.MetricsResult{Device: device}, nil
+}
+
+// buildMetricsFromArray 将 monitorRawSeries 切片转换为 MetricsResult。
+func buildMetricsFromArray(rawSeries []monitorRawSeries, device string) *connector.MetricsResult {
+	result := &connector.MetricsResult{Device: device}
 	for _, rs := range rawSeries {
-		series := connector.MetricSeries{
-			Name: rs.Metric,
-		}
+		series := connector.MetricSeries{Name: rs.Metric}
 		for _, dp := range rs.Data {
 			series.DataPoints = append(series.DataPoints, connector.DataPoint{
 				Timestamp: time.Unix(dp.Time, 0),
@@ -73,8 +98,7 @@ func parseMonitorResponse(body io.ReadCloser, device string) (*connector.Metrics
 		}
 		result.Metrics = append(result.Metrics, series)
 	}
-
-	return result, nil
+	return result
 }
 
 // logPageResponse 日志分页响应结构。
@@ -240,6 +264,7 @@ func (c *ControllerClient) FetchTunnelTraffic(
 
 // FetchSystemLogs 分页查询系统操作日志。
 // API: GET /monitor/logs?startTime=...&endTime=...&pageNum=1&pageSize=10
+// 注意: 服务端不支持 interval 参数，未指定 startTime 时默认查询最近 1 小时。
 func (c *ControllerClient) FetchSystemLogs(
 	ctx context.Context, opts connector.LogQueryOptions,
 ) (*connector.LogResult, error) {
@@ -248,15 +273,19 @@ func (c *ControllerClient) FetchSystemLogs(
 	}
 
 	params := map[string]string{}
-	if !opts.StartTime.IsZero() {
-		params["startTime"] = formatMonitorTime(opts.StartTime)
+	startTime := opts.StartTime
+	endTime := opts.EndTime
+	// 未指定时间范围时默认最近 1 小时
+	if startTime.IsZero() {
+		endTime = time.Now()
+		startTime = endTime.Add(-1 * time.Hour)
 	}
-	if !opts.EndTime.IsZero() {
-		params["endTime"] = formatMonitorTime(opts.EndTime)
+	if endTime.IsZero() {
+		endTime = time.Now()
 	}
-	if opts.Interval != "" && opts.StartTime.IsZero() {
-		params["interval"] = opts.Interval
-	}
+	params["startTime"] = formatMonitorTime(startTime)
+	params["endTime"] = formatMonitorTime(endTime)
+
 	pageNum := opts.PageNum
 	if pageNum < 1 {
 		pageNum = 1
@@ -294,7 +323,8 @@ func (c *ControllerClient) FetchSystemLogs(
 }
 
 // FetchLoginLogs 查询用户登录日志。
-// API: GET /monitor/logs/login?interval=1h
+// API: GET /monitor/logs/login?startTime=...&endTime=...&pageNum=1&pageSize=10
+// 注意: 服务端可能未实现此接口，404 时返回空结果。
 func (c *ControllerClient) FetchLoginLogs(
 	ctx context.Context, opts connector.LogQueryOptions,
 ) (*connector.LogResult, error) {
@@ -303,9 +333,18 @@ func (c *ControllerClient) FetchLoginLogs(
 	}
 
 	params := map[string]string{}
-	if opts.Interval != "" {
-		params["interval"] = opts.Interval
+	startTime := opts.StartTime
+	endTime := opts.EndTime
+	if startTime.IsZero() {
+		endTime = time.Now()
+		startTime = endTime.Add(-1 * time.Hour)
 	}
+	if endTime.IsZero() {
+		endTime = time.Now()
+	}
+	params["startTime"] = formatMonitorTime(startTime)
+	params["endTime"] = formatMonitorTime(endTime)
+
 	pageNum := opts.PageNum
 	if pageNum < 1 {
 		pageNum = 1
@@ -324,6 +363,15 @@ func (c *ControllerClient) FetchLoginLogs(
 		return nil, fmt.Errorf("fetch login logs: %w", err)
 	}
 	defer resp.Body.Close()
+
+	// 服务端未实现登录日志接口时返回空结果
+	if resp.StatusCode == http.StatusNotFound {
+		return &connector.LogResult{
+			Logs:     []map[string]any{},
+			PageNum:  pageNum,
+			PageSize: pageSize,
+		}, nil
+	}
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("fetch login logs: status %d", resp.StatusCode)

@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 
@@ -19,6 +20,7 @@ import (
 
 // FetchSRTEPathDetail 查询单个 SR-TE 隧道策略详情。
 // API: GET /api/sr/config/terra-te-svc:te-policy-instance/{id}
+// 服务端响应可能为 object 或 array，统一返回第一个元素。
 func (c *ControllerClient) FetchSRTEPathDetail(
 	ctx context.Context, instanceID string,
 ) (map[string]any, error) {
@@ -37,11 +39,28 @@ func (c *ControllerClient) FetchSRTEPathDetail(
 		return nil, fmt.Errorf("fetch srte path detail for %s: status %d", instanceID, resp.StatusCode)
 	}
 
-	var result map[string]any
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("decode srte path detail response: %w", err)
+	// 读取原始响应体，兼容 object / array 两种格式
+	rawBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read srte path detail response: %w", err)
 	}
-	return result, nil
+
+	// 先尝试 object
+	var result map[string]any
+	if err := json.Unmarshal(rawBytes, &result); err == nil {
+		return result, nil
+	}
+
+	// 回退: 尝试 array，取第一个元素
+	var arr []map[string]any
+	if err := json.Unmarshal(rawBytes, &arr); err == nil {
+		if len(arr) > 0 {
+			return arr[0], nil
+		}
+		return map[string]any{}, nil
+	}
+
+	return nil, fmt.Errorf("decode srte path detail response: unexpected format")
 }
 
 // ComputeSRTEPath 计算 SR-TE 路径（写操作，预留骨架）。

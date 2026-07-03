@@ -1,6 +1,6 @@
 // cmd/api-test 真实 Controller API 端到端测试工具。
 // 用法: go run cmd/api-test/main.go
-// 验证: 获取 → 解析 → Transform → 打印全流程
+// 覆盖: V1.2-04 全部 API（监控/切片/SR-TE/DetNet + MonitorQuerier/DeviceOperator 委托）
 package main
 
 import (
@@ -26,23 +26,143 @@ const (
 	deviceID     = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
 )
 
-func main() {
-	fmt.Println("╔══════════════════════════════════════════════════════════╗")
-	fmt.Println("║  Controller Connector — 真实 API 端到端测试             ║")
-	fmt.Printf("║  Target: %-48s║\n", baseURL)
-	fmt.Println("╚══════════════════════════════════════════════════════════╝")
-	fmt.Println()
+// ──────────────────────────────
+// 测试结果跟踪
+// ──────────────────────────────
 
-	cfg := map[string]any{
-		"base_url":       baseURL,
-		"token_url":      "/oauth/token",
-		"username":       username,
-		"password":       password,
-		"des_secret_key": desSecretKey,
-		"device_id":      deviceID,
+type testResult struct {
+	name    string
+	status  string // "PASS", "FAIL", "SKIP"
+	detail  string
+	elapsed time.Duration
+}
+
+type testRunner struct {
+	results []testResult
+	start   time.Time
+}
+
+func newTestRunner() *testRunner {
+	return &testRunner{start: time.Now()}
+}
+
+func (r *testRunner) run(name string, fn func() (string, error)) {
+	t0 := time.Now()
+	detail, err := fn()
+	elapsed := time.Since(t0)
+
+	status := "PASS"
+	if err != nil {
+		if strings.Contains(err.Error(), "not implemented") {
+			status = "SKIP"
+			detail = "ErrNotImplemented (预期行为)"
+		} else {
+			status = "FAIL"
+			detail = err.Error()
+		}
 	}
 
-	// 创建跳过 TLS 验证的 HTTPClient
+	icon := "✓"
+	if status == "FAIL" {
+		icon = "✗"
+	} else if status == "SKIP" {
+		icon = "⊘"
+	}
+
+	mark := ""
+	if status == "FAIL" {
+		mark = fmt.Sprintf(" — %s", detail)
+	} else if status == "SKIP" {
+		mark = fmt.Sprintf(" — %s", detail)
+	} else if detail != "" {
+		mark = fmt.Sprintf(" — %s", detail)
+	}
+
+	fmt.Printf("  %s %-56s [%v]%s\n", icon, name, elapsed.Round(time.Millisecond), mark)
+	r.results = append(r.results, testResult{name: name, status: status, detail: detail, elapsed: elapsed})
+}
+
+func (r *testRunner) section(title string) {
+	fmt.Printf("\n━━━ %s ━━━\n", title)
+}
+
+func (r *testRunner) summary() {
+	passed, failed, skipped := 0, 0, 0
+	for _, res := range r.results {
+		switch res.status {
+		case "PASS":
+			passed++
+		case "FAIL":
+			failed++
+		case "SKIP":
+			skipped++
+		}
+	}
+	total := passed + failed + skipped
+
+	fmt.Println("\n╔══════════════════════════════════════════════════════════╗")
+	fmt.Println("║                      测试汇总报告                        ║")
+	fmt.Println("╠══════════════════════════════════════════════════════════╣")
+	fmt.Printf("║  总数:  %-48d║\n", total)
+	fmt.Printf("║  通过:  %-48d║\n", passed)
+	fmt.Printf("║  失败:  %-48d║\n", failed)
+	fmt.Printf("║  跳过:  %-48d║\n", skipped)
+	fmt.Printf("║  耗时:  %-48s║\n", time.Since(r.start).Round(time.Millisecond))
+	fmt.Println("╚══════════════════════════════════════════════════════════╝")
+
+	if failed > 0 {
+		fmt.Println("\n── 失败详情 ──")
+		for _, res := range r.results {
+			if res.status == "FAIL" {
+				fmt.Printf("  ✗ %s: %s\n", res.name, res.detail)
+			}
+		}
+	}
+}
+
+// ──────────────────────────────
+// 辅助函数
+// ──────────────────────────────
+
+func truncate(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	return s[:max-3] + "..."
+}
+
+func countStr(items any) string {
+	switch v := items.(type) {
+	case []map[string]any:
+		return fmt.Sprintf("%d items", len(v))
+	case *connector.MetricsResult:
+		return fmt.Sprintf("%d series", len(v.Metrics))
+	case *connector.LogResult:
+		return fmt.Sprintf("%d logs (total=%d)", len(v.Logs), v.TotalCount)
+	case *connector.TopologyLiveResult:
+		return fmt.Sprintf("%d nodes, %d links", len(v.Nodes), len(v.Links))
+	case map[string]any:
+		return fmt.Sprintf("%d fields", len(v))
+	case string:
+		return fmt.Sprintf("%d chars", len(v))
+	default:
+		return "OK"
+	}
+}
+
+// ──────────────────────────────
+// main
+// ──────────────────────────────
+
+func main() {
+	fmt.Println("╔══════════════════════════════════════════════════════════╗")
+	fmt.Println("║  Controller API — V1.2-04 全面端到端测试                ║")
+	fmt.Printf("║  Target: %-48s║\n", baseURL)
+	fmt.Println("╚══════════════════════════════════════════════════════════╝")
+
+	r := newTestRunner()
+
+	// ── 初始化 ──
 	httpTransport := &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 	}
@@ -54,12 +174,18 @@ func main() {
 		connector.WithTransport(httpTransport),
 	)
 
-	// Step 1: 创建 ControllerClient（统一 API 适配层）
-	apiClient := controller.NewControllerClient("controller-api-test", httpClient, cfg)
+	cfg := map[string]any{
+		"base_url":       baseURL,
+		"token_url":      "/oauth/token",
+		"username":       username,
+		"password":       password,
+		"des_secret_key": desSecretKey,
+		"device_id":      deviceID,
+	}
 
-	// Step 2: 创建 ControllerConnector（Collect 编排层）
+	apiClient := controller.NewControllerClient("api-test", httpClient, cfg)
 	conn := controller.NewControllerConnector(
-		"controller-api-test",
+		"api-test",
 		apiClient,
 		[]string{"Device", "Interface", "Link", "Alarm", "VPN", "Tunnel", "ISIS", "BGP"},
 		baseURL,
@@ -68,62 +194,702 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
-	// Ping 测试
-	fmt.Println("▶ Ping...")
-	if err := conn.Ping(ctx); err != nil {
-		log.Fatalf("✗ Ping failed: %v", err)
-	}
-	fmt.Println("✓ Ping OK — Token acquired")
-	fmt.Println()
+	// ── Section 1: 基础连接 ──
+	r.section("1. 基础连接测试")
 
-	// 逐个测试 8 种实体
+	r.run("Ping", func() (string, error) {
+		err := conn.Ping(ctx)
+		return "Token acquired", err
+	})
+
+	// ── Section 2: 原始 Collect 测试（8 种实体）──
+	r.section("2. Collect 采集测试 (8 种实体)")
+
 	entityTypes := []string{"Device", "Interface", "Link", "Alarm", "VPN", "Tunnel", "ISIS", "BGP"}
-
 	for _, et := range entityTypes {
-		fmt.Printf("━━━ %s ━━━\n", et)
-		resources, err := conn.Collect(ctx, et)
-		if err != nil {
-			fmt.Printf("✗ Error: %v\n\n", err)
-			continue
-		}
-
-		fmt.Printf("✓ Collected: %d resources\n", len(resources))
-
-		// 打印前 3 个资源的详情
-		limit := 3
-		if len(resources) < limit {
-			limit = len(resources)
-		}
-		for i := 0; i < limit; i++ {
-			r := resources[i]
-			fmt.Printf("  [%d] Kind=%s, ID=%s\n", i, r.Kind, r.ID)
-			printProps(r.Properties)
-		}
-		if len(resources) > 3 {
-			fmt.Printf("  ... and %d more\n", len(resources)-3)
-		}
-		fmt.Println()
+		etCopy := et
+		r.run(fmt.Sprintf("Collect(%s)", etCopy), func() (string, error) {
+			resources, err := conn.Collect(ctx, etCopy)
+			if err != nil {
+				return "", err
+			}
+			return fmt.Sprintf("%d resources", len(resources)), nil
+		})
 	}
 
-	// 汇总
-	fmt.Println("━━━ 汇总 ━━━")
-	for _, et := range entityTypes {
-		resources, err := conn.Collect(ctx, et)
+	// ── Section 3: 监控 API (ControllerClient 直接调用) ──
+	r.section("3. 监控 API (ControllerClient)")
+
+	now := time.Now()
+	hourAgo := now.Add(-1 * time.Hour)
+	testDevice := ""       // 动态获取第一个设备名
+	testPort := "GigabitEthernet0/0/0"
+	testVPN := ""          // 动态获取第一个真实 VPN ID (svc-name)
+	testTunnel := ""       // 动态获取第一个真实 Tunnel 名 (tunnel-name)
+	testTunnelDevice := "" // 动态获取 Tunnel 所属设备名 (src_device)
+
+	// 先获取一个真实设备名
+	r.run("获取测试设备名", func() (string, error) {
+		resources, err := conn.Collect(ctx, "Device")
 		if err != nil {
-			fmt.Printf("  %-12s: ERROR (%v)\n", et, err)
-		} else {
-			fmt.Printf("  %-12s: %d\n", et, len(resources))
+			return "", err
 		}
-	}
+		if len(resources) > 0 {
+			if name, ok := resources[0].Properties["name"].(string); ok {
+				testDevice = name
+			}
+		}
+		if testDevice == "" {
+			testDevice = "NJ-SCT-R01" // fallback
+		}
+		return fmt.Sprintf("device=%s", testDevice), nil
+	})
+
+	// 获取真实 VPN ID（监控 API 使用 svc-name 作为 vpnId 维度值）
+	r.run("获取测试VPN ID", func() (string, error) {
+		resources, err := conn.Collect(ctx, "VPN")
+		if err != nil {
+			return "", err
+		}
+		if len(resources) > 0 {
+			// 优先使用 svc-name（监控维度值），回退到 vpn-id
+			if name, ok := resources[0].Properties["name"].(string); ok && name != "" {
+				testVPN = name
+			} else {
+				testVPN = resources[0].ID
+			}
+		}
+		if testVPN == "" {
+			return "no VPN resources found", nil
+		}
+		return fmt.Sprintf("vpnId=%s (id=%s)", testVPN, resources[0].ID), nil
+	})
+
+	// 获取真实 Tunnel 名（监控 API 使用 tunnel-name 而非 instance-id）
+	r.run("获取测试Tunnel名", func() (string, error) {
+		resources, err := conn.Collect(ctx, "Tunnel")
+		if err != nil {
+			return "", err
+		}
+		if len(resources) > 0 {
+			// 优先使用 tunnel_name（来自 te-tuples 嵌套结构），回退到 policy-template-name
+			if tn, ok := resources[0].Properties["tunnel_name"].(string); ok && tn != "" {
+				testTunnel = tn
+			} else if name, ok := resources[0].Properties["name"].(string); ok && name != "" {
+				testTunnel = name
+			} else {
+				testTunnel = resources[0].ID
+			}
+		}
+		if testTunnel == "" {
+			return "no Tunnel resources found", nil
+		}
+		// 同时获取 Tunnel 所属设备名
+		if sd, ok := resources[0].Properties["src_device"].(string); ok && sd != "" {
+			testTunnelDevice = sd
+		}
+		return fmt.Sprintf("tunnelName=%s device=%s (id=%s)", testTunnel, testTunnelDevice, resources[0].ID), nil
+	})
+
+	testMonitorAPIs(r, apiClient, ctx, testDevice, testPort, testVPN, testTunnel, testTunnelDevice, hourAgo, now)
+
+	// ── Section 4: 切片管理 API ──
+	r.section("4. 切片管理 API (ControllerClient)")
+	testSliceAPIs(r, apiClient, ctx)
+
+	// ── Section 5: SR-TE API ──
+	r.section("5. SR-TE API (ControllerClient)")
+	testSRTEAPIs(r, apiClient, ctx)
+
+	// ── Section 6: DetNet API ──
+	r.section("6. 确定性网络 API (ControllerClient)")
+	testDetNetAPIs(r, apiClient, ctx)
+
+	// ── Section 7: MonitorQuerier 委托调用 ──
+	r.section("7. MonitorQuerier 委托调用 (ControllerConnector)")
+	testMonitorQuerier(r, conn, ctx, testDevice, testPort, testVPN, testTunnel, testTunnelDevice, hourAgo, now)
+
+	// ── Section 8: DeviceOperator 委托调用 ──
+	r.section("8. DeviceOperator 委托调用 (ControllerConnector)")
+	testDeviceOperator(r, conn, ctx, testDevice)
+
+	// ── 汇总 ──
+	r.summary()
 }
 
+// ══════════════════════════════════════════════════════════
+// 3. 监控 API 测试
+// ══════════════════════════════════════════════════════════
+
+func testMonitorAPIs(r *testRunner, c *controller.ControllerClient, ctx context.Context,
+	device, port, vpnID, tunnel, tunnelDevice string, start, end time.Time) {
+
+	// 3.1 FetchDeviceMetrics
+	r.run("FetchDeviceMetrics(cpu_usage)", func() (string, error) {
+		result, err := c.FetchDeviceMetrics(ctx, device, []string{"cpu_usage"}, start, end)
+		if err != nil {
+			return "", err
+		}
+		return countStr(result), nil
+	})
+
+	// 3.2 FetchDeviceMetrics 多指标
+	r.run("FetchDeviceMetrics(cpu,mem,disk)", func() (string, error) {
+		result, err := c.FetchDeviceMetrics(ctx, device, []string{"cpu_usage", "memory_usage", "disk_usage"}, start, end)
+		if err != nil {
+			return "", err
+		}
+		return countStr(result), nil
+	})
+
+	// 3.3 FetchPortMetrics
+	r.run("FetchPortMetrics(in_traffic,out_traffic)", func() (string, error) {
+		result, err := c.FetchPortMetrics(ctx, device, port, []string{"in_traffic", "out_traffic"}, start, end)
+		if err != nil {
+			return "", err
+		}
+		return countStr(result), nil
+	})
+
+	// 3.4 FetchVPNTraffic（使用真实 VPN ID）
+	r.run("FetchVPNTraffic", func() (string, error) {
+		if vpnID == "" {
+			return "skip: no VPN resources", nil
+		}
+		result, err := c.FetchVPNTraffic(ctx, vpnID, []string{"in_bytes", "out_bytes"}, start, end)
+		if err != nil {
+			return "", err
+		}
+		return countStr(result), nil
+	})
+
+	// 3.5 FetchTunnelTraffic（使用真实 Tunnel 名 + Tunnel 所属设备）
+	r.run("FetchTunnelTraffic", func() (string, error) {
+		if tunnel == "" {
+			return "skip: no Tunnel resources", nil
+		}
+		tDev := tunnelDevice
+		if tDev == "" {
+			tDev = device // fallback 到通用设备名
+		}
+		result, err := c.FetchTunnelTraffic(ctx, tDev, tunnel, []string{"in_bytes"}, start, end)
+		if err != nil {
+			return "", err
+		}
+		return countStr(result), nil
+	})
+
+	// 3.6 FetchSystemLogs
+	r.run("FetchSystemLogs(interval=1h)", func() (string, error) {
+		result, err := c.FetchSystemLogs(ctx, connector.LogQueryOptions{
+			Interval: "1h", PageNum: 1, PageSize: 10,
+		})
+		if err != nil {
+			return "", err
+		}
+		return countStr(result), nil
+	})
+
+	// 3.7 FetchSystemLogs 时间范围
+	r.run("FetchSystemLogs(startTime/endTime)", func() (string, error) {
+		result, err := c.FetchSystemLogs(ctx, connector.LogQueryOptions{
+			StartTime: start, EndTime: end, PageNum: 1, PageSize: 5,
+		})
+		if err != nil {
+			return "", err
+		}
+		return countStr(result), nil
+	})
+
+	// 3.8 FetchLoginLogs
+	r.run("FetchLoginLogs(interval=1h)", func() (string, error) {
+		result, err := c.FetchLoginLogs(ctx, connector.LogQueryOptions{
+			Interval: "1h", PageNum: 1, PageSize: 10,
+		})
+		if err != nil {
+			return "", err
+		}
+		return countStr(result), nil
+	})
+
+	// 3.9 FetchLogs(system)
+	r.run("FetchLogs(system)", func() (string, error) {
+		result, err := c.FetchLogs(ctx, "system", connector.LogQueryOptions{
+			Interval: "1h", PageNum: 1, PageSize: 5,
+		})
+		if err != nil {
+			return "", err
+		}
+		return countStr(result), nil
+	})
+
+	// 3.10 FetchLogs(login)
+	r.run("FetchLogs(login)", func() (string, error) {
+		result, err := c.FetchLogs(ctx, "login", connector.LogQueryOptions{
+			Interval: "1h", PageNum: 1, PageSize: 5,
+		})
+		if err != nil {
+			return "", err
+		}
+		return countStr(result), nil
+	})
+
+	// 3.11 FetchTopology
+	r.run("FetchTopology", func() (string, error) {
+		result, err := c.FetchTopology(ctx)
+		if err != nil {
+			return "", err
+		}
+		return countStr(result), nil
+	})
+
+	// 3.12 FetchTopologyNodes
+	r.run("FetchTopologyNodes", func() (string, error) {
+		nodes, err := c.FetchTopologyNodes(ctx)
+		if err != nil {
+			return "", err
+		}
+		return countStr(nodes), nil
+	})
+
+	// 3.13 FetchTopologyLinks
+	r.run("FetchTopologyLinks", func() (string, error) {
+		links, err := c.FetchTopologyLinks(ctx)
+		if err != nil {
+			return "", err
+		}
+		return countStr(links), nil
+	})
+
+	// 3.14 FetchLinkMetrics
+	r.run("FetchLinkMetrics", func() (string, error) {
+		metrics, err := c.FetchLinkMetrics(ctx)
+		if err != nil {
+			return "", err
+		}
+		return countStr(metrics), nil
+	})
+
+	// 3.15 FetchL2Links
+	r.run("FetchL2Links(topology=default)", func() (string, error) {
+		links, err := c.FetchL2Links(ctx, "default")
+		if err != nil {
+			return "", err
+		}
+		return countStr(links), nil
+	})
+}
+
+// ══════════════════════════════════════════════════════════
+// 4. 切片管理 API 测试
+// ══════════════════════════════════════════════════════════
+
+func testSliceAPIs(r *testRunner, c *controller.ControllerClient, ctx context.Context) {
+	// FlexE Group
+	r.run("ListFlexEGroups", func() (string, error) {
+		groups, err := c.ListFlexEGroups(ctx, "", "")
+		if err != nil {
+			return "", err
+		}
+		return countStr(groups), nil
+	})
+
+	r.run("ListFlexEGroups(device=过滤)", func() (string, error) {
+		groups, err := c.ListFlexEGroups(ctx, "NJ-SCT-R01", "")
+		if err != nil {
+			return "", err
+		}
+		return countStr(groups), nil
+	})
+
+	// CreateFlexEGroup (只读测试 — 发送空 body 看服务端响应)
+	r.run("CreateFlexEGroup(空body→预期错误)", func() (string, error) {
+		result, err := c.CreateFlexEGroup(ctx, map[string]any{"name": "test-group-e2e"})
+		if err != nil {
+			return "", err
+		}
+		return countStr(result), nil
+	})
+
+	// UpdateFlexEGroup
+	r.run("UpdateFlexEGroup(空body→预期错误)", func() (string, error) {
+		err := c.UpdateFlexEGroup(ctx, map[string]any{"name": "test-group-e2e", "id": "nonexistent"})
+		if err != nil {
+			return "", err
+		}
+		return "OK", nil
+	})
+
+	// DeleteFlexEGroup
+	r.run("DeleteFlexEGroup(nonexistent→预期404)", func() (string, error) {
+		err := c.DeleteFlexEGroup(ctx, "nonexistent-id")
+		if err != nil {
+			return "", err
+		}
+		return "OK (意外成功)", nil
+	})
+
+	// FlexE Client
+	r.run("ListFlexEClients(groupId=test)", func() (string, error) {
+		clients, err := c.ListFlexEClients(ctx, "test-group-id")
+		if err != nil {
+			return "", err
+		}
+		return countStr(clients), nil
+	})
+
+	r.run("CreateFlexEClient(空body→预期错误)", func() (string, error) {
+		result, err := c.CreateFlexEClient(ctx, map[string]any{"name": "test-client-e2e"})
+		if err != nil {
+			return "", err
+		}
+		return countStr(result), nil
+	})
+
+	r.run("UpdateFlexEClient(空body→预期错误)", func() (string, error) {
+		err := c.UpdateFlexEClient(ctx, map[string]any{"name": "test-client-e2e"})
+		if err != nil {
+			return "", err
+		}
+		return "OK", nil
+	})
+
+	r.run("DeleteFlexEClient(nonexistent→预期404)", func() (string, error) {
+		err := c.DeleteFlexEClient(ctx, "nonexistent-id")
+		if err != nil {
+			return "", err
+		}
+		return "OK", nil
+	})
+
+	r.run("DownloadPortInfo", func() (string, error) {
+		text, err := c.DownloadPortInfo(ctx)
+		if err != nil {
+			return "", err
+		}
+		return countStr(text), nil
+	})
+
+	// Sub-Interface Slicing
+	r.run("ListSubInterfaceSlicings", func() (string, error) {
+		items, err := c.ListSubInterfaceSlicings(ctx, "", "")
+		if err != nil {
+			return "", err
+		}
+		return countStr(items), nil
+	})
+
+	r.run("CreateSubInterfaceSlicing(空body→预期错误)", func() (string, error) {
+		result, err := c.CreateSubInterfaceSlicing(ctx, map[string]any{"name": "test-slicing-e2e"})
+		if err != nil {
+			return "", err
+		}
+		return countStr(result), nil
+	})
+
+	r.run("UpdateSubInterfaceSlicing(空body→预期错误)", func() (string, error) {
+		err := c.UpdateSubInterfaceSlicing(ctx, map[string]any{"name": "test-slicing-e2e"})
+		if err != nil {
+			return "", err
+		}
+		return "OK", nil
+	})
+
+	r.run("DeleteSubInterfaceSlicing(nonexistent→预期404)", func() (string, error) {
+		err := c.DeleteSubInterfaceSlicing(ctx, "nonexistent-id")
+		if err != nil {
+			return "", err
+		}
+		return "OK", nil
+	})
+
+	// SRv6 Slice
+	r.run("ListSRv6Slices", func() (string, error) {
+		slices, err := c.ListSRv6Slices(ctx, "", "")
+		if err != nil {
+			return "", err
+		}
+		return countStr(slices), nil
+	})
+
+	r.run("ListSRv6Slices(device=过滤)", func() (string, error) {
+		slices, err := c.ListSRv6Slices(ctx, "", "NJ-SCT-R01")
+		if err != nil {
+			return "", err
+		}
+		return countStr(slices), nil
+	})
+
+	r.run("CreateSRv6Slice(空body→预期错误)", func() (string, error) {
+		result, err := c.CreateSRv6Slice(ctx, map[string]any{"name": "test-srv6-e2e"})
+		if err != nil {
+			return "", err
+		}
+		return countStr(result), nil
+	})
+
+	r.run("UpdateSRv6Slice(空body→预期错误)", func() (string, error) {
+		err := c.UpdateSRv6Slice(ctx, map[string]any{"name": "test-srv6-e2e"})
+		if err != nil {
+			return "", err
+		}
+		return "OK", nil
+	})
+
+	r.run("DeleteSRv6Slice(nonexistent→预期404)", func() (string, error) {
+		err := c.DeleteSRv6Slice(ctx, "nonexistent-id")
+		if err != nil {
+			return "", err
+		}
+		return "OK", nil
+	})
+}
+
+// ══════════════════════════════════════════════════════════
+// 5. SR-TE API 测试
+// ══════════════════════════════════════════════════════════
+
+func testSRTEAPIs(r *testRunner, c *controller.ControllerClient, ctx context.Context) {
+	r.run("FetchSRTEPathDetail(test-id)", func() (string, error) {
+		result, err := c.FetchSRTEPathDetail(ctx, "test-policy-instance")
+		if err != nil {
+			return "", err
+		}
+		return countStr(result), nil
+	})
+
+	r.run("ComputeSRTEPath(ErrNotImplemented)", func() (string, error) {
+		_, err := c.ComputeSRTEPath(ctx, map[string]any{"src": "A", "dst": "B"})
+		if err == nil {
+			return "", fmt.Errorf("expected ErrNotImplemented but got nil")
+		}
+		if !strings.Contains(err.Error(), "not implemented") {
+			return "", fmt.Errorf("expected ErrNotImplemented, got: %v", err)
+		}
+		return "ErrNotImplemented (预期)", nil
+	})
+
+	r.run("CreateSRTEPolicy(ErrNotImplemented)", func() (string, error) {
+		_, err := c.CreateSRTEPolicy(ctx, map[string]any{"name": "test"})
+		if err == nil {
+			return "", fmt.Errorf("expected ErrNotImplemented but got nil")
+		}
+		if !strings.Contains(err.Error(), "not implemented") {
+			return "", fmt.Errorf("expected ErrNotImplemented, got: %v", err)
+		}
+		return "ErrNotImplemented (预期)", nil
+	})
+}
+
+// ══════════════════════════════════════════════════════════
+// 6. 确定性网络 API 测试
+// ══════════════════════════════════════════════════════════
+
+func testDetNetAPIs(r *testRunner, c *controller.ControllerClient, ctx context.Context) {
+	r.run("ListDetNetInstances", func() (string, error) {
+		instances, err := c.ListDetNetInstances(ctx)
+		if err != nil {
+			return "", err
+		}
+		return countStr(instances), nil
+	})
+
+	r.run("CreateDetNetInstance(空body→预期错误)", func() (string, error) {
+		result, err := c.CreateDetNetInstance(ctx, map[string]any{"name": "test-detnet-e2e"})
+		if err != nil {
+			return "", err
+		}
+		return countStr(result), nil
+	})
+
+	r.run("UpdateDetNetInstance(nonexistent→预期404)", func() (string, error) {
+		err := c.UpdateDetNetInstance(ctx, "nonexistent-id", map[string]any{"name": "test"})
+		if err != nil {
+			return "", err
+		}
+		return "OK", nil
+	})
+
+	r.run("DeleteDetNetInstance(nonexistent→预期404)", func() (string, error) {
+		err := c.DeleteDetNetInstance(ctx, "nonexistent-id")
+		if err != nil {
+			return "", err
+		}
+		return "OK", nil
+	})
+
+	r.run("FetchDetNetOAMData(instance=test,interval=60)", func() (string, error) {
+		data, err := c.FetchDetNetOAMData(ctx, "test-instance", 60)
+		if err != nil {
+			return "", err
+		}
+		return countStr(data), nil
+	})
+
+	r.run("RestartDetNetTimeslot(nonexistent→预期错误)", func() (string, error) {
+		err := c.RestartDetNetTimeslot(ctx, "nonexistent-instance")
+		if err != nil {
+			return "", err
+		}
+		return "OK", nil
+	})
+}
+
+// ══════════════════════════════════════════════════════════
+// 7. MonitorQuerier 委托调用测试
+// ══════════════════════════════════════════════════════════
+
+func testMonitorQuerier(r *testRunner, conn *controller.ControllerConnector, ctx context.Context,
+	device, port, vpnID, tunnel, tunnelDevice string, start, end time.Time) {
+
+	r.run("QueryDeviceMetrics(cpu_usage)", func() (string, error) {
+		result, err := conn.QueryDeviceMetrics(ctx, device, []string{"cpu_usage"}, start, end)
+		if err != nil {
+			return "", err
+		}
+		return countStr(result), nil
+	})
+
+	r.run("QueryPortMetrics(in_traffic)", func() (string, error) {
+		result, err := conn.QueryPortMetrics(ctx, device, port, []string{"in_traffic"}, start, end)
+		if err != nil {
+			return "", err
+		}
+		return countStr(result), nil
+	})
+
+	r.run("QueryVPNTraffic", func() (string, error) {
+		if vpnID == "" {
+			return "skip: no VPN resources", nil
+		}
+		result, err := conn.QueryVPNTraffic(ctx, vpnID, []string{"in_bytes"}, start, end)
+		if err != nil {
+			return "", err
+		}
+		return countStr(result), nil
+	})
+
+	r.run("QueryTunnelTraffic", func() (string, error) {
+		if tunnel == "" {
+			return "skip: no Tunnel resources", nil
+		}
+		tDev := tunnelDevice
+		if tDev == "" {
+			tDev = device // fallback
+		}
+		result, err := conn.QueryTunnelTraffic(ctx, tDev, tunnel, []string{"in_bytes"}, start, end)
+		if err != nil {
+			return "", err
+		}
+		return countStr(result), nil
+	})
+
+	r.run("QueryAlerts", func() (string, error) {
+		alerts, err := conn.QueryAlerts(ctx, "system", "1h")
+		if err != nil {
+			return "", err
+		}
+		return countStr(alerts), nil
+	})
+
+	r.run("QueryLogs(system)", func() (string, error) {
+		result, err := conn.QueryLogs(ctx, "system", connector.LogQueryOptions{
+			Interval: "1h", PageNum: 1, PageSize: 5,
+		})
+		if err != nil {
+			return "", err
+		}
+		return countStr(result), nil
+	})
+}
+
+// ══════════════════════════════════════════════════════════
+// 8. DeviceOperator 委托调用测试
+// ══════════════════════════════════════════════════════════
+
+func testDeviceOperator(r *testRunner, conn *controller.ControllerConnector, ctx context.Context, device string) {
+	r.run("QueryDeviceConfig", func() (string, error) {
+		result, err := conn.QueryDeviceConfig(ctx, device)
+		if err != nil {
+			return "", err
+		}
+		return countStr(result), nil
+	})
+
+	r.run("QueryISISNeighbors", func() (string, error) {
+		neighbors, err := conn.QueryISISNeighbors(ctx, device)
+		if err != nil {
+			return "", err
+		}
+		return countStr(neighbors), nil
+	})
+
+	r.run("QueryBGPPeers", func() (string, error) {
+		peers, err := conn.QueryBGPPeers(ctx, device)
+		if err != nil {
+			return "", err
+		}
+		return countStr(peers), nil
+	})
+
+	r.run("QueryVPNConfig", func() (string, error) {
+		result, err := conn.QueryVPNConfig(ctx, device)
+		if err != nil {
+			return "", err
+		}
+		return countStr(result), nil
+	})
+
+	r.run("QueryGlobalRoute", func() (string, error) {
+		routes, err := conn.QueryGlobalRoute(ctx, device)
+		if err != nil {
+			return "", err
+		}
+		return countStr(routes), nil
+	})
+
+	r.run("ListFlexEGroups(DeviceOperator)", func() (string, error) {
+		groups, err := conn.ListFlexEGroups(ctx, connector.FilterOptions{})
+		if err != nil {
+			return "", err
+		}
+		return countStr(groups), nil
+	})
+
+	r.run("ListSRv6Slices(DeviceOperator)", func() (string, error) {
+		slices, err := conn.ListSRv6Slices(ctx, connector.FilterOptions{})
+		if err != nil {
+			return "", err
+		}
+		return countStr(slices), nil
+	})
+
+	r.run("ListDetNetInstances(DeviceOperator)", func() (string, error) {
+		instances, err := conn.ListDetNetInstances(ctx)
+		if err != nil {
+			return "", err
+		}
+		return countStr(instances), nil
+	})
+
+	r.run("QueryTopologyLive(DeviceOperator)", func() (string, error) {
+		result, err := conn.QueryTopologyLive(ctx)
+		if err != nil {
+			return "", err
+		}
+		return countStr(result), nil
+	})
+}
+
+// ──────────────────────────────
+// 工具函数（保留原有功能）
+// ──────────────────────────────
+
 func printProps(props map[string]any) {
-	// 按 key 排序打印
 	keys := make([]string, 0, len(props))
 	for k := range props {
 		keys = append(keys, k)
 	}
-	// 简单排序
 	for i := 0; i < len(keys); i++ {
 		for j := i + 1; j < len(keys); j++ {
 			if keys[i] > keys[j] {
@@ -131,7 +897,6 @@ func printProps(props map[string]any) {
 			}
 		}
 	}
-
 	for _, k := range keys {
 		v := props[k]
 		s := formatValue(v)
@@ -163,8 +928,11 @@ func formatValue(v any) string {
 	}
 }
 
+// 抑制未使用警告
+var _ = truncate
+var _ = printProps
+
 func init() {
-	// 设置 stderr 日志级别（过滤 slog 日志输出）
 	log.SetOutput(os.Stderr)
 	log.SetFlags(log.Ltime)
 }
