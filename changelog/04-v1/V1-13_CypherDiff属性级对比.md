@@ -93,9 +93,9 @@ type SnapshotDiffOutput struct {
 
 ## 验收标准
 
-- [ ] 编译通过
-- [ ] Cypher Diff 对两个逻辑 DB 中同 URI 节点正确报告属性级变更
-- [ ] 与 LocalDiff 结果一致（对相同数据）
-- [ ] MCP 输出包含 `changed_nodes` / `changed_relations` 统计
-- [ ] 现有 AddedNodes/RemovedNodes 逻辑不受影响
-- [ ] Cypher 性能可接受（利用 `(_db, uri)` 复合索引）
+- [x] 编译通过
+- [x] Cypher Diff 对两个逻辑 DB 中同 URI 节点正确报告属性级变更
+- [x] 与 LocalDiff 结果一致（对相同数据）
+- [x] MCP 输出包含 `changed_nodes` / `changed_relations` 统计
+- [x] 现有 AddedNodes/RemovedNodes 逻辑不受影响
+- [x] Cypher 性能可接受（利用 `(_db, uri)` 复合索引）

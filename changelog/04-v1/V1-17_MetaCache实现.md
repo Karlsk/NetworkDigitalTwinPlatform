@@ -109,10 +109,10 @@ func importMetaOnly(filePath string) (SnapshotMeta, error) {
 
 ## 验收标准
 
-- [ ] 编译通过
-- [ ] 第二次 `List()` 调用从缓存返回，不读取 YAML 文件
-- [ ] `Create` 后 `List` 立即可见新快照
-- [ ] `Delete` 后 `List` 立即不可见
-- [ ] 100 个快照文件时 `List()` 性能 < 100ms（首次 warm cache 后 < 1ms）
-- [ ] 并发 `List()` 调用无 data race
-- [ ] `go test -race ./internal/snapshot/...` 全部通过
+- [x] 编译通过
+- [x] 第二次 `List()` 调用从缓存返回，不读取 YAML 文件
+- [x] `Create` 后 `List` 立即可见新快照
+- [x] `Delete` 后 `List` 立即不可见
+- [x] 100 个快照文件时 `List()` 性能 < 100ms（首次 warm cache 后 < 1ms）
+- [x] 并发 `List()` 调用无 data race
+- [x] `go test -race ./internal/snapshot/...` 全部通过

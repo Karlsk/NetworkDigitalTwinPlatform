@@ -163,11 +163,11 @@ f.RegisterBuilder("netbox", func(name string, cfg map[string]any, entityTypes []
 
 ## 验收标准
 
-- [ ] 编译通过
-- [ ] `Collect("Device")` 返回正确的 `[]Resource`，字段与 Schema `properties` 对应
-- [ ] `Collect("Interface")` 同理
-- [ ] `Ping()` 对不可达 URL 返回带上下文的 error
-- [ ] 分页正确遍历所有页
-- [ ] 超时/重试正常工作
-- [ ] `Collect` 对不支持的 entityType 返回清晰错误
-- [ ] 在 ConnectorFactory 中正确注册 "netbox" builder
+- [x] 编译通过
+- [x] `Collect("Device")` 返回正确的 `[]Resource`，字段与 Schema `properties` 对应
+- [x] `Collect("Interface")` 同理
+- [x] `Ping()` 对不可达 URL 返回带上下文的 error
+- [x] 分页正确遍历所有页
+- [x] 超时/重试正常工作
+- [x] `Collect` 对不支持的 entityType 返回清晰错误
+- [x] 在 ConnectorFactory 中正确注册 "netbox" builder

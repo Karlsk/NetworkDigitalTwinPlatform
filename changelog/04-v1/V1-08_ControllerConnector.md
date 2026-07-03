@@ -77,9 +77,9 @@ f.RegisterBuilder("controller", func(name string, cfg map[string]any, entityType
 
 ## 验收标准
 
-- [ ] 编译通过
-- [ ] `Collect("Device_Status")` 返回正确的动态状态 `[]Resource`
-- [ ] `Ping()` 验证控制器可达性
-- [ ] 超时策略更短（15s），QPS 更高（20）
-- [ ] 不支持的 entityType 返回清晰错误
-- [ ] `Stream()` 返回 `ErrNotImplemented`（V2 实现 Kafka 消费）
+- [x] 编译通过
+- [x] `Collect("Device_Status")` 返回正确的动态状态 `[]Resource`
+- [x] `Ping()` 验证控制器可达性
+- [x] 超时策略更短（15s），QPS 更高（20）
+- [x] 不支持的 entityType 返回清晰错误
+- [x] `Stream()` 返回 `ErrNotImplemented`（V2 实现 Kafka 消费）

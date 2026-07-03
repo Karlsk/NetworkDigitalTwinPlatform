@@ -131,9 +131,9 @@ func toFloat64(v any) (float64, bool) {
 
 ## 验收标准
 
-- [ ] 编译通过
-- [ ] `NodeChange`/`RelChange`/`FieldChange` 类型可被其他包引用
-- [ ] `compareProps` 正确分类 added/removed/modified
-- [ ] `valuesEqual` 正确处理 int(42) vs float64(42.0) → 相等
-- [ ] `valuesEqual` 正确处理 "up" vs "down" → 不相等
-- [ ] 空 map 对比返回三个空 map
+- [x] 编译通过
+- [x] `NodeChange`/`RelChange`/`FieldChange` 类型可被其他包引用
+- [x] `compareProps` 正确分类 added/removed/modified
+- [x] `valuesEqual` 正确处理 int(42) vs float64(42.0) → 相等
+- [x] `valuesEqual` 正确处理 "up" vs "down" → 不相等
+- [x] 空 map 对比返回三个空 map

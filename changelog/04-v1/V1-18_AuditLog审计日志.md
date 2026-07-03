@@ -134,10 +134,10 @@ MCP `query_snapshot` 工具新增 `action=audit` 参数查看审计日志。
 
 ## 验收标准
 
-- [ ] 编译通过
-- [ ] Create/Restore/Delete 操作均记录审计日志
-- [ ] 审计日志按时间序排列
-- [ ] 超出 maxEntries 时正确 FIFO 淘汰旧条目
-- [ ] 按 Action/Snapshot/时间范围过滤查询正确
-- [ ] `Recent(n)` 返回最近 N 条
-- [ ] `go test -race ./internal/snapshot/...` 全部通过
+- [x] 编译通过
+- [x] Create/Restore/Delete 操作均记录审计日志
+- [x] 审计日志按时间序排列
+- [x] 超出 maxEntries 时正确 FIFO 淘汰旧条目
+- [x] 按 Action/Snapshot/时间范围过滤查询正确
+- [x] `Recent(n)` 返回最近 N 条
+- [x] `go test -race ./internal/snapshot/...` 全部通过

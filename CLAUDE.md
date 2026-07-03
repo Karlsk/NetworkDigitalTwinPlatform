@@ -35,23 +35,30 @@
 
 ---
 
-## 核心功能模块（MVP 范围）
+## 核心功能模块（MVP + V1 范围）
 
 | # | 模块 | 包路径 | 职责 |
 |---|------|--------|------|
-| 1 | Schema Registry | `internal/schema/` | YAML 本体定义加载、EntityType/RelationType 注册与查询、Schema 校验 |
-| 2 | Connector 框架 | `internal/connector/` | 插件式数据源适配器接口 + Registry + Mock 实现 |
-| 3 | 归一化引擎 | `internal/normalizer/` | 字段标准化（fieldMapping）、URI 生成（uriTemplate）、属性类型校验 |
-| 4 | GraphAssembler (IR 层) | `internal/assembler/` | NormalizedResource → GraphModel 组装，节点转换 + 关系推导 + 孤儿边校验 |
-| 5 | 图数据库驱动 | `internal/graph/` | GraphDB 接口封装，Cypher 生成 + 执行，逻辑多 DB，BuildCypher 预览 |
-| 6 | 快照管理 | `internal/snapshot/` | 快照创建/恢复/列表/删除/对比，YAML 归档 + Neo4j 逻辑 DB 懒加载 |
-| 7 | GraphLock 并发保护 | `internal/snapshot/graphlock.go` | sync.RWMutex 保护 Restore/FullSync/IncrementalSync 写锁互斥 |
-| 8 | 同步服务 | `internal/service/sync_service.go` | 全量同步（ClearDB + BulkCreate）+ 增量同步（Webhook + Channel 缓冲 + Upsert/Delete） |
-| 9 | MCP Server | `internal/mcp/` | stdio JSON-RPC 工具暴露层，只读工具 + 写操作工具 |
-| 10 | 全局配置 | `internal/config/` | Viper 配置加载，支持环境变量覆盖 |
-| 11 | Docker Compose | `deploy/docker-compose.yml` | Neo4j CE + Go 服务编排 |
+| 1 | Schema Registry | `internal/schema/` | YAML 本体定义加载、EntityType/RelationType 注册与查询、Schema 校验、**Extends 继承合并** |
+| 2 | Connector 框架 | `internal/connector/` | 插件式数据源适配器接口 + Registry + **ConnectorFactory 工厂模式** |
+| 3 | HTTP 客户端公共层 | `internal/connector/httpclient.go` | **Token/Basic Auth、指数退避重试、限流、分页** |
+| 4 | NetboxConnector | `internal/connector/netbox/` | **Device + Interface 采集 (REST API)** |
+| 5 | CMDBConnector | `internal/connector/cmdb/` | **ISIS + Link + Network_Slice 采集 (REST API)** |
+| 6 | ControllerConnector | `internal/connector/controller/` | **Device_Status + Telemetry 动态状态采集** |
+| 7 | 归一化引擎 | `internal/normalizer/` | 字段标准化（fieldMapping）、URI 生成（uriTemplate）、属性类型校验 |
+| 8 | GraphAssembler (IR 层) | `internal/assembler/` | NormalizedResource → GraphModel 组装，节点转换 + 关系推导 + 孤儿边校验、**多 Label 节点** |
+| 9 | 图数据库驱动 | `internal/graph/` | GraphDB 接口封装，Cypher 生成 + 执行，逻辑多 DB，BuildCypher 预览、**多 Label 索引** |
+| 10 | 快照管理 | `internal/snapshot/` | 快照创建/恢复/列表/删除/对比，YAML 归档 + Neo4j 逻辑 DB 懒加载、**MetaCache 缓存**、**属性级 Diff (ChangedNodes/ChangedRels)** |
+| 11 | 审计日志 | `internal/snapshot/audit.go` | **AuditLog 审计记录 (FIFO + defer 模式)** |
+| 12 | GraphLock 并发保护 | `internal/snapshot/graphlock.go` | sync.RWMutex 保护 Restore/FullSync/IncrementalSync 写锁互斥 |
+| 13 | 同步服务 | `internal/service/sync_service.go` | 全量同步（ClearDB + BulkCreate）+ 增量同步（Webhook + Channel 缓冲 + Upsert/Delete） |
+| 14 | MCP Server | `internal/mcp/` | stdio JSON-RPC 工具暴露层，只读工具 + 写操作工具 |
+| 15 | 全局配置 | `internal/config/` | Viper 配置加载，支持环境变量覆盖、**快照 TTL 保留策略** |
+| 16 | Docker Compose | `deploy/docker-compose.yml` | Neo4j CE + Go 服务编排 |
 
-**MVP 不包含（放 V1）**: RCA/Impact/Simulation Engine、PostgreSQL、真实 Connector、HTTP API (Gin)、可观测性、定时调度、Kafka 事件流。
+**MVP 不包含（V1 已实现）**: 真实 Connector (Netbox/CMDB/Controller)、ConnectorFactory 工厂模式、HTTP 客户端公共层、属性级 Diff (LocalDiff/CypherDiff)、EntityType Extends 继承、Neo4j 多 Label、MetaCache 缓存、AuditLog 审计日志、快照 TTL 保留策略、全量集成测试。
+
+**V2 预留**: RCA/Impact/Simulation Engine、PostgreSQL、HTTP API (Gin)、可观测性、定时调度、Kafka 事件流。
 
 ---
 
@@ -68,10 +75,15 @@ network-digital-twin/
 │   │   ├── registry.go          # SchemaRegistry 实现
 │   │   ├── types.go             # EntityType, RelationType 结构体
 │   │   └── validator.go         # Schema 校验器
-│   ├── connector/               # Connector 框架
+│   ├── connector/               # Connector 框架 + V1 工厂模式
 │   │   ├── interface.go         # Connector + ConnectorRegistry 接口
 │   │   ├── types.go             # Resource, Metadata 结构体
-│   │   └── mock/mock.go         # Mock Connector
+│   │   ├── factory.go           # ConnectorFactory 工厂模式
+│   │   ├── httpclient.go        # HTTP 客户端公共层 (Auth/Retry/RateLimit/Pagination)
+│   │   ├── mock/mock.go         # Mock Connector
+│   │   ├── netbox/              # NetboxConnector (Device + Interface)
+│   │   ├── cmdb/                # CMDBConnector (ISIS + Link + Network_Slice)
+│   │   └── controller/          # ControllerConnector (Device_Status + Telemetry)
 │   ├── normalizer/normalizer.go # 归一化引擎
 │   ├── assembler/               # GraphAssembler (IR 层)
 │   │   ├── assembler.go         # 组装逻辑
@@ -80,10 +92,11 @@ network-digital-twin/
 │   │   ├── interface.go         # GraphDB 接口
 │   │   ├── neo4j.go             # Neo4j 实现
 │   │   └── logical_db.go        # 逻辑多 DB 管理
-│   ├── snapshot/                # 快照管理
-│   │   ├── manager.go           # 快照生命周期
+│   ├── snapshot/                # 快照管理 + V1 增强
+│   │   ├── manager.go           # 快照生命周期 + MetaCache 缓存
 │   │   ├── exporter.go          # 图 → YAML 导出
 │   │   ├── importer.go          # YAML → 图导入
+│   │   ├── audit.go             # AuditLog 审计日志
 │   │   └── graphlock.go         # GraphLock 并发保护
 │   ├── engine/                  # 分析引擎 (纯算法，V1 实现)
 │   ├── service/                 # 业务编排层

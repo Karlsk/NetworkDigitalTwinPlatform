@@ -139,9 +139,9 @@ if err := factory.CreateFromConfig("configs/connectors.yaml", connRegistry); err
 
 ## 验收标准
 
-- [ ] 编译通过
-- [ ] 仅修改 `connectors.yaml` 即可切换 Mock/真实 Connector（无需改代码）
-- [ ] `ConnectorFactory.CreateFromConfig()` 正确创建所有已注册的 Connector
-- [ ] `ConnectorFactory` 对未知 type 返回清晰错误: `"connector type %q: builder not registered"`
-- [ ] Mock type builder 内置注册，启动即可用
-- [ ] `cmd/server/main.go` 中无硬编码 Connector 创建
+- [x] 编译通过
+- [x] 仅修改 `connectors.yaml` 即可切换 Mock/真实 Connector（无需改代码）
+- [x] `ConnectorFactory.CreateFromConfig()` 正确创建所有已注册的 Connector
+- [x] `ConnectorFactory` 对未知 type 返回清晰错误: `"connector type %q: builder not registered"`
+- [x] Mock type builder 内置注册，启动即可用
+- [x] `cmd/server/main.go` 中无硬编码 Connector 创建

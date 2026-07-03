@@ -76,9 +76,9 @@ func (m *SnapshotManager) LocalDiff(a, b string) (*SnapshotDiff, error) {
 
 ## 验收标准
 
-- [ ] 编译通过
-- [ ] LocalDiff 对相同 URI 的节点正确报告 AddedFields
-- [ ] LocalDiff 对相同 URI 的节点正确报告 RemovedFields
-- [ ] LocalDiff 对相同 URI 的节点正确报告 ModifiedFields（含 int/float64 归一化）
-- [ ] 无属性差异的节点不出现在 ChangedNodes 中
-- [ ] 现有 AddedNodes/RemovedNodes 逻辑不受影响
+- [x] 编译通过
+- [x] LocalDiff 对相同 URI 的节点正确报告 AddedFields
+- [x] LocalDiff 对相同 URI 的节点正确报告 RemovedFields
+- [x] LocalDiff 对相同 URI 的节点正确报告 ModifiedFields（含 int/float64 归一化）
+- [x] 无属性差异的节点不出现在 ChangedNodes 中
+- [x] 现有 AddedNodes/RemovedNodes 逻辑不受影响

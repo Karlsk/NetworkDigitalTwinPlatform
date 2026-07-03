@@ -201,12 +201,12 @@ spec:
 
 ## 验收标准
 
-- [ ] 编译通过
-- [ ] 无 `extends` 字段的 YAML 仍然正常工作（向后兼容）
-- [ ] `extends: Resource` 的 Device 自动继承 Resource 的 Properties（status, vendor）
-- [ ] 子类型同名属性覆盖父类型
-- [ ] FieldMapping/Normalize/RelationFields 正确合并
-- [ ] Identity 和 URITemplate 不被继承
-- [ ] 循环继承（A extends B extends A）被检测并返回 error
-- [ ] 多级继承（A extends B extends C）按拓扑序正确合并
-- [ ] `go test ./internal/schema/...` 全部通过
+- [x] 编译通过
+- [x] 无 `extends` 字段的 YAML 仍然正常工作（向后兼容）
+- [x] `extends: Resource` 的 Device 自动继承 Resource 的 Properties（status, vendor）
+- [x] 子类型同名属性覆盖父类型
+- [x] FieldMapping/Normalize/RelationFields 正确合并
+- [x] Identity 和 URITemplate 不被继承
+- [x] 循环继承（A extends B extends A）被检测并返回 error
+- [x] 多级继承（A extends B extends C）按拓扑序正确合并
+- [x] `go test ./internal/schema/...` 全部通过

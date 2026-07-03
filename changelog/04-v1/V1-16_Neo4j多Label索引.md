@@ -125,10 +125,10 @@ MATCH (n:Device) WHERE n._db = $_db RETURN n
 
 ## 验收标准
 
-- [ ] 编译通过
-- [ ] Device 节点在 Neo4j 中有两个 Label: `:Resource:Device`
-- [ ] `MATCH (n:Resource) WHERE n._db = $_db RETURN n` 返回所有 Resource 子类型
-- [ ] `MATCH (n:Device) WHERE n._db = $_db RETURN n` 只返回 Device
-- [ ] 父 Label 索引（Resource）和子 Label 索引（Device）均存在
-- [ ] 无继承的实体仍然只有单标签
-- [ ] `go test -race ./...` 全部通过
+- [x] 编译通过
+- [x] Device 节点在 Neo4j 中有两个 Label: `:Resource:Device`
+- [x] `MATCH (n:Resource) WHERE n._db = $_db RETURN n` 返回所有 Resource 子类型
+- [x] `MATCH (n:Device) WHERE n._db = $_db RETURN n` 只返回 Device
+- [x] 父 Label 索引（Resource）和子 Label 索引（Device）均存在
+- [x] 无继承的实体仍然只有单标签
+- [x] `go test -race ./...` 全部通过

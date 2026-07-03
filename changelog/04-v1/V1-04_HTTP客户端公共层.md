@@ -120,11 +120,11 @@ golang.org/x/time/rate  // 限流器
 
 ## 验收标准
 
-- [ ] 编译通过
-- [ ] Token Auth 正确注入 `Authorization: Token xxx` Header
-- [ ] Basic Auth 正确注入 `Authorization: Basic xxx` Header
-- [ ] 5xx 错误触发指数退避重试，4xx 不重试
-- [ ] 限流器正确控制 QPS，默认 10 QPS
-- [ ] `Paginate()` 能遍历所有页并回调，处理空结果/单页/多页
-- [ ] 超时正确返回 context deadline exceeded
-- [ ] `go test ./internal/connector/...` 全部通过
+- [x] 编译通过
+- [x] Token Auth 正确注入 `Authorization: Token xxx` Header
+- [x] Basic Auth 正确注入 `Authorization: Basic xxx` Header
+- [x] 5xx 错误触发指数退避重试，4xx 不重试
+- [x] 限流器正确控制 QPS，默认 10 QPS
+- [x] `Paginate()` 能遍历所有页并回调，处理空结果/单页/多页
+- [x] 超时正确返回 context deadline exceeded
+- [x] `go test ./internal/connector/...` 全部通过

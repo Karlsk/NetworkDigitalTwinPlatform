@@ -69,7 +69,7 @@ func (c *MockConnector) Ping(ctx context.Context) error {
 
 ## 验收标准
 
-- [ ] 编译通过，所有现有 Connector 实现均满足新接口
-- [ ] `MockConnector.Ping()` 返回 nil
-- [ ] `ConnectorMetadata` 新字段 `Type`/`BaseURL`/`Timeout`/`AuthType` 可正确赋值
-- [ ] `go test ./internal/connector/...` 全部通过
+- [x] 编译通过，所有现有 Connector 实现均满足新接口
+- [x] `MockConnector.Ping()` 返回 nil
+- [x] `ConnectorMetadata` 新字段 `Type`/`BaseURL`/`Timeout`/`AuthType` 可正确赋值
+- [x] `go test ./internal/connector/...` 全部通过

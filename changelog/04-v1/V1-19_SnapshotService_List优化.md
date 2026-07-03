@@ -55,8 +55,8 @@ func (m *SnapshotManager) AuditLog() *AuditLog {
 
 ## 验收标准
 
-- [ ] 编译通过
-- [ ] MCP `query_snapshot list` 第二次调用明显快于首次（MetaCache 生效）
-- [ ] AuditLog 可通过 Service 层查询
-- [ ] `SnapshotService.AuditLog(filter)` 返回正确结果
-- [ ] `go test ./internal/service/...` 全部通过
+- [x] 编译通过
+- [x] MCP `query_snapshot list` 第二次调用明显快于首次（MetaCache 生效）
+- [x] AuditLog 可通过 Service 层查询
+- [x] `SnapshotService.AuditLog(filter)` 返回正确结果
+- [x] `go test ./internal/service/...` 全部通过

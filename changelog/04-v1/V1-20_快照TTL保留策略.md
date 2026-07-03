@@ -92,8 +92,8 @@ snapshot:
 
 ## 验收标准
 
-- [ ] 编译通过
-- [ ] `retentionDays > 0` 时，超期快照在 Create 后被自动清理
-- [ ] `retentionDays = 0` 时不自动清理
-- [ ] 审计日志记录自动清理事件（action: "auto_delete"）
-- [ ] `go test ./internal/snapshot/...` 全部通过
+- [x] 编译通过
+- [x] `retentionDays > 0` 时，超期快照在 Create 后被自动清理
+- [x] `retentionDays = 0` 时不自动清理
+- [x] 审计日志记录自动清理事件（action: "auto_delete"）
+- [x] `go test ./internal/snapshot/...` 全部通过

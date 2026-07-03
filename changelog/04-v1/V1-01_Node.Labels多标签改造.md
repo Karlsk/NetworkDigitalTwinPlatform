@@ -166,9 +166,9 @@ Diff 输出等引用 `Node.Label` 的地方全部适配为 `Node.MostSpecificLab
 
 ## 验收标准
 
-- [ ] `go build ./...` 编译通过
-- [ ] `go test -race ./...` 全部现有测试通过
-- [ ] `BuildCypher("create", ...)` 输出包含多 Label 格式 `CREATE (x:Parent:Child ...)`
-- [ ] 旧格式 YAML 快照文件（`label` 字段）仍可正确导入（向后兼容）
-- [ ] `NewNode(label, uri, props)` 便捷构造函数正常工作
-- [ ] `Node.MostSpecificLabel()` 返回正确的最具体标签
+- [x] `go build ./...` 编译通过
+- [x] `go test -race ./...` 全部现有测试通过
+- [x] `BuildCypher("create", ...)` 输出包含多 Label 格式 `CREATE (x:Parent:Child ...)`
+- [x] 旧格式 YAML 快照文件（`label` 字段）仍可正确导入（向后兼容）
+- [x] `NewNode(label, uri, props)` 便捷构造函数正常工作
+- [x] `Node.MostSpecificLabel()` 返回正确的最具体标签

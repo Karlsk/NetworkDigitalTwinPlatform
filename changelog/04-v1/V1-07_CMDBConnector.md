@@ -78,11 +78,11 @@ f.RegisterBuilder("cmdb", func(name string, cfg map[string]any, entityTypes []st
 
 ## 验收标准
 
-- [ ] 编译通过
-- [ ] `Collect("ISIS")` 返回正确的 `[]Resource`
-- [ ] `Collect("Link")` 返回正确的 `[]Resource`
-- [ ] `Collect("Network_Slice")` 返回正确的 `[]Resource`
-- [ ] 三种实体类型均正确采集和转换
-- [ ] 与 NetboxConnector 共享 HTTPClient 基础设施（认证、重试、限流）
-- [ ] `Ping()` 验证 CMDB 可达性
-- [ ] 不支持的 entityType 返回清晰错误
+- [x] 编译通过
+- [x] `Collect("ISIS")` 返回正确的 `[]Resource`
+- [x] `Collect("Link")` 返回正确的 `[]Resource`
+- [x] `Collect("Network_Slice")` 返回正确的 `[]Resource`
+- [x] 三种实体类型均正确采集和转换
+- [x] 与 NetboxConnector 共享 HTTPClient 基础设施（认证、重试、限流）
+- [x] `Ping()` 验证 CMDB 可达性
+- [x] 不支持的 entityType 返回清晰错误

@@ -65,9 +65,9 @@ V1-11 定义了属性级变更类型，V1-12/V1-13 分别实现了 LocalDiff 和
 
 ## 验收标准
 
-- [ ] 全部测试用例通过
-- [ ] LocalDiff 属性级对比 6 个测试用例全部通过
-- [ ] Cypher Diff 属性级对比通过
-- [ ] LocalDiff 和 Cypher Diff 对相同输入产出一致的 ChangedNodes/ChangedRels
-- [ ] compareProps 数值归一化测试通过
-- [ ] `go test -race ./internal/snapshot/...` 全部通过
+- [x] 全部测试用例通过
+- [x] LocalDiff 属性级对比 6 个测试用例全部通过
+- [x] Cypher Diff 属性级对比通过
+- [x] LocalDiff 和 Cypher Diff 对相同输入产出一致的 ChangedNodes/ChangedRels
+- [x] compareProps 数值归一化测试通过
+- [x] `go test -race ./internal/snapshot/...` 全部通过

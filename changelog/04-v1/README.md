@@ -24,11 +24,11 @@
 | [V1-04](V1-04_HTTP客户端公共层.md) | HTTP 客户端公共层 | 1天 | V1-02 | httpclient.go (认证/重试/限流/分页) |
 | [V1-05](V1-05_迁移测试与回归.md) | 迁移测试 + 回归验证 | 1天 | V1-01, V1-03, V1-04 | go test -race 全量通过 |
 
-- [ ] V1-01 编译通过 + 全量测试绿灯
-- [ ] V1-02 MockConnector 实现 Ping()
-- [ ] V1-03 ConnectorFactory 从 YAML 配置创建 Mock Connector
-- [ ] V1-04 HTTPClient Token/Basic Auth + 重试 + 限流
-- [ ] V1-05 `go test -race ./...` 全部通过，覆盖率 >= 70%
+- [x] V1-01 编译通过 + 全量测试绿灯
+- [x] V1-02 MockConnector 实现 Ping()
+- [x] V1-03 ConnectorFactory 从 YAML 配置创建 Mock Connector
+- [x] V1-04 HTTPClient Token/Basic Auth + 重试 + 限流
+- [x] V1-05 `go test -race ./...` 全部通过，覆盖率 >= 70%
 
 ---
 
@@ -44,11 +44,11 @@
 | [V1-09](V1-09_Connector集成测试.md) | Connector 集成测试 (httptest mock server) | 1.5天 | V1-06~V1-08 | 各 connector _test.go |
 | [V1-10](V1-10_全链路验证.md) | 全链路验证 (真实 Connector + FullSync) | 1天 | V1-09 | E2E 测试更新 |
 
-- [ ] V1-06 NetboxConnector.Collect("Device") + Collect("Interface") 正确
-- [ ] V1-07 CMDBConnector 三种实体类型均可采集
-- [ ] V1-08 ControllerConnector 动态状态采集正确
-- [ ] V1-09 httptest mock server 7 个测试用例全部通过
-- [ ] V1-10 E2E httptest mock server 通过完整同步流水线
+- [x] V1-06 NetboxConnector.Collect("Device") + Collect("Interface") 正确
+- [x] V1-07 CMDBConnector 三种实体类型均可采集
+- [x] V1-08 ControllerConnector 动态状态采集正确
+- [x] V1-09 httptest mock server 7 个测试用例全部通过
+- [x] V1-10 E2E httptest mock server 通过完整同步流水线
 
 ---
 
@@ -65,12 +65,12 @@
 | [V1-15](V1-15_EntityTypeSpec_Extends.md) | EntityTypeSpec Extends + 继承合并 | 1.5天 | V1-01 | schema/types.go + registry.go |
 | [V1-16](V1-16_Neo4j多Label索引.md) | Neo4j 多 Label + EnsureIndexes | 1天 | V1-15, V1-01 | graph/neo4j.go + assembler.go |
 
-- [ ] V1-11 NodeChange/RelChange 类型可被其他包引用
-- [ ] V1-12 LocalDiff 正确报告 AddedFields/RemovedFields/ModifiedFields
-- [ ] V1-13 Cypher Diff 与 LocalDiff 结果一致
-- [ ] V1-14 全部 Diff 测试用例通过
-- [ ] V1-15 Device extends Resource 正确继承 Properties，循环继承被检测
-- [ ] V1-16 Neo4j `MATCH (n:Resource)` 覆盖所有子类型
+- [x] V1-11 NodeChange/RelChange 类型可被其他包引用
+- [x] V1-12 LocalDiff 正确报告 AddedFields/RemovedFields/ModifiedFields
+- [x] V1-13 Cypher Diff 与 LocalDiff 结果一致
+- [x] V1-14 全部 Diff 测试用例通过
+- [x] V1-15 Device extends Resource 正确继承 Properties，循环继承被检测
+- [x] V1-16 Neo4j `MATCH (n:Resource)` 覆盖所有子类型
 
 ---
 
@@ -87,12 +87,12 @@
 | [V1-21](V1-21_V1全量集成测试.md) | V1 全量集成测试 | 1.5天 | V1-01~V1-20 | 全模块测试更新 |
 | [V1-22](V1-22_V1验收与文档归档.md) | V1 验收 + 文档归档 | 1天 | V1-21 | 验收报告 + changelog |
 
-- [ ] V1-17 第二次 List() 从缓存返回，不读取 YAML
-- [ ] V1-18 Create/Restore/Delete 操作均记录审计日志
-- [ ] V1-19 MCP query_snapshot list 第二次调用明显快于首次
-- [ ] V1-20 retentionDays > 0 时超期快照自动清理
-- [ ] V1-21 go test -race 全部通过，覆盖率 >= 70%
-- [ ] V1-22 15 项验收清单全部通过
+- [x] V1-17 第二次 List() 从缓存返回，不读取 YAML
+- [x] V1-18 Create/Restore/Delete 操作均记录审计日志
+- [x] V1-19 MCP query_snapshot list 第二次调用明显快于首次
+- [x] V1-20 retentionDays > 0 时超期快照自动清理
+- [x] V1-21 go test -race 全部通过，覆盖率 >= 70%
+- [x] V1-22 15 项验收清单全部通过
 
 ---
 
