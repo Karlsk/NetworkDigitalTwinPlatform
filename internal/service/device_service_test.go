@@ -38,12 +38,6 @@ type capabilityConnector struct {
 	vpnErr         error
 	routeResult    []map[string]any
 	routeErr       error
-	flexeResult    []map[string]any
-	flexeErr       error
-	srv6Result     []map[string]any
-	srv6Err        error
-	detnetResult   []map[string]any
-	detnetErr      error
 	topologyResult *connector.TopologyLiveResult
 	topologyErr    error
 }
@@ -88,15 +82,6 @@ func (c *capabilityConnector) QueryVPNConfig(_ context.Context, _ string) (map[s
 }
 func (c *capabilityConnector) QueryGlobalRoute(_ context.Context, _ string) ([]map[string]any, error) {
 	return c.routeResult, c.routeErr
-}
-func (c *capabilityConnector) ListFlexEGroups(_ context.Context, _ connector.FilterOptions) ([]map[string]any, error) {
-	return c.flexeResult, c.flexeErr
-}
-func (c *capabilityConnector) ListSRv6Slices(_ context.Context, _ connector.FilterOptions) ([]map[string]any, error) {
-	return c.srv6Result, c.srv6Err
-}
-func (c *capabilityConnector) ListDetNetInstances(_ context.Context) ([]map[string]any, error) {
-	return c.detnetResult, c.detnetErr
 }
 func (c *capabilityConnector) QueryTopologyLive(_ context.Context) (*connector.TopologyLiveResult, error) {
 	return c.topologyResult, c.topologyErr
@@ -430,60 +415,6 @@ func TestQueryDeviceInfo_Topology(t *testing.T) {
 	}
 	if len(tr.Nodes) != 1 || len(tr.Links) != 1 {
 		t.Errorf("topology mismatch: nodes=%d, links=%d", len(tr.Nodes), len(tr.Links))
-	}
-}
-
-func TestQueryDeviceInfo_FlexE(t *testing.T) {
-	cc := &capabilityConnector{
-		mockConnector: mockConnector{name: "ctrl", entityTypes: []string{"Device"}},
-		flexeResult:   []map[string]any{{"group_id": "flexe-01"}},
-	}
-	svc := setupDeviceService(t, cc)
-
-	result, err := svc.QueryDeviceInfo(context.Background(), DeviceInfoRequest{
-		ConnectorName: "ctrl", QueryType: "flexe", Device: "router-01",
-	})
-	if err != nil {
-		t.Fatalf("QueryDeviceInfo(flexe) error = %v", err)
-	}
-	if result == nil {
-		t.Fatal("result is nil")
-	}
-}
-
-func TestQueryDeviceInfo_SRV6(t *testing.T) {
-	cc := &capabilityConnector{
-		mockConnector: mockConnector{name: "ctrl", entityTypes: []string{"Device"}},
-		srv6Result:    []map[string]any{{"slice_id": "srv6-01"}},
-	}
-	svc := setupDeviceService(t, cc)
-
-	result, err := svc.QueryDeviceInfo(context.Background(), DeviceInfoRequest{
-		ConnectorName: "ctrl", QueryType: "srv6", Device: "router-01",
-	})
-	if err != nil {
-		t.Fatalf("QueryDeviceInfo(srv6) error = %v", err)
-	}
-	if result == nil {
-		t.Fatal("result is nil")
-	}
-}
-
-func TestQueryDeviceInfo_DetNet(t *testing.T) {
-	cc := &capabilityConnector{
-		mockConnector: mockConnector{name: "ctrl", entityTypes: []string{"Device"}},
-		detnetResult:  []map[string]any{{"instance_id": "detnet-01"}},
-	}
-	svc := setupDeviceService(t, cc)
-
-	result, err := svc.QueryDeviceInfo(context.Background(), DeviceInfoRequest{
-		ConnectorName: "ctrl", QueryType: "detnet",
-	})
-	if err != nil {
-		t.Fatalf("QueryDeviceInfo(detnet) error = %v", err)
-	}
-	if result == nil {
-		t.Fatal("result is nil")
 	}
 }
 

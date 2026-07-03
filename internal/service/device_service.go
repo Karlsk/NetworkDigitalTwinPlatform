@@ -144,12 +144,6 @@ func (s *DeviceService) QueryDeviceInfo(ctx context.Context, req DeviceInfoReque
 		return op.QueryGlobalRoute(ctx, req.Device)
 	case "topology":
 		return op.QueryTopologyLive(ctx)
-	case "flexe":
-		return op.ListFlexEGroups(ctx, connector.FilterOptions{DeviceName: req.Device})
-	case "srv6":
-		return op.ListSRv6Slices(ctx, connector.FilterOptions{DeviceName: req.Device})
-	case "detnet":
-		return op.ListDetNetInstances(ctx)
 	default:
 		return nil, fmt.Errorf("unknown device query_type %q", req.QueryType)
 	}

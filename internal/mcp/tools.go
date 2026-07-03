@@ -324,7 +324,7 @@ func (h *toolHandlers) handleQueryMonitor(
 // QueryDeviceInfoInput 定义 query_device_info 工具的输入参数。
 type QueryDeviceInfoInput struct {
 	ConnectorName string `json:"connector_name" jsonschema:"目标 Connector 名称"`
-	QueryType     string `json:"query_type" jsonschema:"查询类型: config/isis/bgp/vpn_config/route/topology/flexe/srv6/detnet"`
+	QueryType     string `json:"query_type" jsonschema:"查询类型: config/isis/bgp/vpn_config/route/topology"`
 	Device        string `json:"device,omitempty" jsonschema:"设备名称"`
 }
 

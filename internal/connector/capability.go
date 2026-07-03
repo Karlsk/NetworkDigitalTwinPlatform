@@ -68,18 +68,6 @@ type DeviceOperator interface {
 	// API: POST /restconf/operations/oper-rpc:global-route
 	QueryGlobalRoute(ctx context.Context, device string) ([]map[string]any, error)
 
-	// ListFlexEGroups 查询 FlexE Group 列表。
-	// API: GET /api/no/config/terra-flexe:flexe/flexe-group
-	ListFlexEGroups(ctx context.Context, opts FilterOptions) ([]map[string]any, error)
-
-	// ListSRv6Slices 查询 SRv6 网络切片列表。
-	// API: GET /api/no/config/terra-slicing:srv6-network-slices/srv6-network-slice
-	ListSRv6Slices(ctx context.Context, opts FilterOptions) ([]map[string]any, error)
-
-	// ListDetNetInstances 查询确定性网络探测实例列表。
-	// API: GET /api/no/config/terra-h3c-detnet/ip/service/all
-	ListDetNetInstances(ctx context.Context) ([]map[string]any, error)
-
 	// QueryTopologyLive 查询实时拓扑视图（节点+链路），不依赖 Neo4j。
 	// API: GET /api/sr/config/network-topology:network-topology
 	QueryTopologyLive(ctx context.Context) (*TopologyLiveResult, error)
@@ -125,13 +113,6 @@ type LogResult struct {
 	TotalCount int              `json:"total_count"`
 	PageNum    int              `json:"page_num"`
 	PageSize   int              `json:"page_size"`
-}
-
-// FilterOptions 通用过滤选项。
-type FilterOptions struct {
-	DeviceName    string `json:"device_name,omitempty"`
-	DstDeviceName string `json:"dst_device_name,omitempty"`
-	SliceID       string `json:"slice_id,omitempty"`
 }
 
 // TopologyLiveResult 实时拓扑查询结果。

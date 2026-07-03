@@ -256,30 +256,6 @@ func setupOperatorFullMockServer(t *testing.T) *httptest.Server {
 		})
 	})
 
-	// FlexE Group 列表
-	mux.HandleFunc("/api/no/config/terra-flexe:flexe/flexe-group", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode([]map[string]any{
-			{"id": "fg-001", "deviceName": "NJ-SCT-R01"},
-		})
-	})
-
-	// SRv6 切片列表
-	mux.HandleFunc("/api/no/config/terra-slicing:srv6-network-slices/srv6-network-slice", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode([]map[string]any{
-			{"sliceId": "slice-001", "device": "NJ-SCT-R01"},
-		})
-	})
-
-	// DetNet 实例列表
-	mux.HandleFunc("/api/no/config/terra-h3c-detnet/ip/service/all", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode([]map[string]any{
-			{"id": "detnet-001", "name": "probe-1"},
-		})
-	})
-
 	// 拓扑
 	mux.HandleFunc("/api/sr/config/network-topology:network-topology", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/sr/config/network-topology:network-topology" {
@@ -294,57 +270,6 @@ func setupOperatorFullMockServer(t *testing.T) *httptest.Server {
 	})
 
 	return httptest.NewServer(mux)
-}
-
-func TestOperatorListFlexEGroups(t *testing.T) {
-	server := setupOperatorFullMockServer(t)
-	defer server.Close()
-
-	c := newOperatorTestConnector(t, server.URL)
-	result, err := c.ListFlexEGroups(context.Background(), connector.FilterOptions{DeviceName: "NJ-SCT-R01"})
-	if err != nil {
-		t.Fatalf("ListFlexEGroups() error = %v", err)
-	}
-	if len(result) != 1 {
-		t.Fatalf("ListFlexEGroups() result len = %d, want 1", len(result))
-	}
-	if result[0]["id"] != "fg-001" {
-		t.Errorf("ListFlexEGroups() id = %v, want fg-001", result[0]["id"])
-	}
-}
-
-func TestOperatorListSRv6Slices(t *testing.T) {
-	server := setupOperatorFullMockServer(t)
-	defer server.Close()
-
-	c := newOperatorTestConnector(t, server.URL)
-	result, err := c.ListSRv6Slices(context.Background(), connector.FilterOptions{DeviceName: "NJ-SCT-R01"})
-	if err != nil {
-		t.Fatalf("ListSRv6Slices() error = %v", err)
-	}
-	if len(result) != 1 {
-		t.Fatalf("ListSRv6Slices() result len = %d, want 1", len(result))
-	}
-	if result[0]["sliceId"] != "slice-001" {
-		t.Errorf("ListSRv6Slices() sliceId = %v, want slice-001", result[0]["sliceId"])
-	}
-}
-
-func TestOperatorListDetNetInstances(t *testing.T) {
-	server := setupOperatorFullMockServer(t)
-	defer server.Close()
-
-	c := newOperatorTestConnector(t, server.URL)
-	result, err := c.ListDetNetInstances(context.Background())
-	if err != nil {
-		t.Fatalf("ListDetNetInstances() error = %v", err)
-	}
-	if len(result) != 1 {
-		t.Fatalf("ListDetNetInstances() result len = %d, want 1", len(result))
-	}
-	if result[0]["id"] != "detnet-001" {
-		t.Errorf("ListDetNetInstances() id = %v, want detnet-001", result[0]["id"])
-	}
 }
 
 func TestOperatorQueryTopologyLive(t *testing.T) {
@@ -405,8 +330,8 @@ func TestTypeAssertionFromAnyToDeviceOperator(t *testing.T) {
 // ──────────────────────────────
 
 func TestDeviceOperatorMethodCount(t *testing.T) {
-	// 文档定义 DeviceOperator 有 9 个方法
-	// 全部 9 个方法已委托 ControllerClient 实现，由各自专项测试覆盖。
+	// 文档定义 DeviceOperator 有 6 个方法
+	// 全部 6 个方法已委托 ControllerClient 实现，由各自专项测试覆盖。
 	// 接口满足性由编译时 var _ connector.DeviceOperator = (*ControllerConnector)(nil) 保证。
 	// 此测试验证所有方法均可通过 mock server 正常调用。
 	server := setupOperatorFullMockServer(t)
@@ -418,13 +343,7 @@ func TestDeviceOperatorMethodCount(t *testing.T) {
 	// Method 1-5: 已有专项测试覆盖，此处仅验证可调用
 	_, _ = c.QueryDeviceConfig(ctx, "NJ-SCT-R01")
 	// QueryISISNeighbors / QueryBGPPeers 需要额外 mock（peInfos），跳过
-	// Method 6: ListFlexEGroups
-	_, _ = c.ListFlexEGroups(ctx, connector.FilterOptions{})
-	// Method 7: ListSRv6Slices
-	_, _ = c.ListSRv6Slices(ctx, connector.FilterOptions{})
-	// Method 8: ListDetNetInstances
-	_, _ = c.ListDetNetInstances(ctx)
-	// Method 9: QueryTopologyLive
+	// Method 6: QueryTopologyLive
 	_, _ = c.QueryTopologyLive(ctx)
 }
 

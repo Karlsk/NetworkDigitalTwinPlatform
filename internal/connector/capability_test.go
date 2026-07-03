@@ -55,15 +55,6 @@ func (s *stubDeviceOperator) QueryVPNConfig(_ context.Context, _ string) (map[st
 func (s *stubDeviceOperator) QueryGlobalRoute(_ context.Context, _ string) ([]map[string]any, error) {
 	return nil, ErrNotImplemented
 }
-func (s *stubDeviceOperator) ListFlexEGroups(_ context.Context, _ FilterOptions) ([]map[string]any, error) {
-	return nil, ErrNotImplemented
-}
-func (s *stubDeviceOperator) ListSRv6Slices(_ context.Context, _ FilterOptions) ([]map[string]any, error) {
-	return nil, ErrNotImplemented
-}
-func (s *stubDeviceOperator) ListDetNetInstances(_ context.Context) ([]map[string]any, error) {
-	return nil, ErrNotImplemented
-}
 func (s *stubDeviceOperator) QueryTopologyLive(_ context.Context) (*TopologyLiveResult, error) {
 	return nil, ErrNotImplemented
 }
@@ -119,13 +110,6 @@ func TestLogResultZeroValue(t *testing.T) {
 	}
 	if r.TotalCount != 0 {
 		t.Errorf("zero value TotalCount = %d, want 0", r.TotalCount)
-	}
-}
-
-func TestFilterOptionsZeroValue(t *testing.T) {
-	var opts FilterOptions
-	if opts.DeviceName != "" {
-		t.Errorf("zero value DeviceName = %q, want empty", opts.DeviceName)
 	}
 }
 
@@ -213,15 +197,6 @@ func TestDeviceOperatorTypeAssertion(t *testing.T) {
 	}
 	if _, err := dop.QueryGlobalRoute(ctx, "device1"); !errors.Is(err, ErrNotImplemented) {
 		t.Errorf("QueryGlobalRoute() error = %v, want ErrNotImplemented", err)
-	}
-	if _, err := dop.ListFlexEGroups(ctx, FilterOptions{}); !errors.Is(err, ErrNotImplemented) {
-		t.Errorf("ListFlexEGroups() error = %v, want ErrNotImplemented", err)
-	}
-	if _, err := dop.ListSRv6Slices(ctx, FilterOptions{}); !errors.Is(err, ErrNotImplemented) {
-		t.Errorf("ListSRv6Slices() error = %v, want ErrNotImplemented", err)
-	}
-	if _, err := dop.ListDetNetInstances(ctx); !errors.Is(err, ErrNotImplemented) {
-		t.Errorf("ListDetNetInstances() error = %v, want ErrNotImplemented", err)
 	}
 	if _, err := dop.QueryTopologyLive(ctx); !errors.Is(err, ErrNotImplemented) {
 		t.Errorf("QueryTopologyLive() error = %v, want ErrNotImplemented", err)

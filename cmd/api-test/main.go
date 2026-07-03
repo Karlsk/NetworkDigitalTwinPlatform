@@ -1,6 +1,6 @@
 // cmd/api-test 真实 Controller API 端到端测试工具。
 // 用法: go run cmd/api-test/main.go
-// 覆盖: V1.2-04 全部 API（监控/切片/SR-TE/DetNet + MonitorQuerier/DeviceOperator 委托）
+// 覆盖: V1.2-04 API（监控/SR-TE + MonitorQuerier/DeviceOperator 委托）
 package main
 
 import (
@@ -293,24 +293,16 @@ func main() {
 
 	testMonitorAPIs(r, apiClient, ctx, testDevice, testPort, testVPN, testTunnel, testTunnelDevice, hourAgo, now)
 
-	// ── Section 4: 切片管理 API ──
-	r.section("4. 切片管理 API (ControllerClient)")
-	testSliceAPIs(r, apiClient, ctx)
-
-	// ── Section 5: SR-TE API ──
-	r.section("5. SR-TE API (ControllerClient)")
+	// ── Section 4: SR-TE API ──
+	r.section("4. SR-TE API (ControllerClient)")
 	testSRTEAPIs(r, apiClient, ctx)
 
-	// ── Section 6: DetNet API ──
-	r.section("6. 确定性网络 API (ControllerClient)")
-	testDetNetAPIs(r, apiClient, ctx)
-
-	// ── Section 7: MonitorQuerier 委托调用 ──
-	r.section("7. MonitorQuerier 委托调用 (ControllerConnector)")
+	// ── Section 5: MonitorQuerier 委托调用 ──
+	r.section("5. MonitorQuerier 委托调用 (ControllerConnector)")
 	testMonitorQuerier(r, conn, ctx, testDevice, testPort, testVPN, testTunnel, testTunnelDevice, hourAgo, now)
 
-	// ── Section 8: DeviceOperator 委托调用 ──
-	r.section("8. DeviceOperator 委托调用 (ControllerConnector)")
+	// ── Section 6: DeviceOperator 委托调用 ──
+	r.section("6. DeviceOperator 委托调用 (ControllerConnector)")
 	testDeviceOperator(r, conn, ctx, testDevice)
 
 	// ── 汇总 ──
@@ -481,172 +473,7 @@ func testMonitorAPIs(r *testRunner, c *controller.ControllerClient, ctx context.
 }
 
 // ══════════════════════════════════════════════════════════
-// 4. 切片管理 API 测试
-// ══════════════════════════════════════════════════════════
-
-func testSliceAPIs(r *testRunner, c *controller.ControllerClient, ctx context.Context) {
-	// FlexE Group
-	r.run("ListFlexEGroups", func() (string, error) {
-		groups, err := c.ListFlexEGroups(ctx, "", "")
-		if err != nil {
-			return "", err
-		}
-		return countStr(groups), nil
-	})
-
-	r.run("ListFlexEGroups(device=过滤)", func() (string, error) {
-		groups, err := c.ListFlexEGroups(ctx, "NJ-SCT-R01", "")
-		if err != nil {
-			return "", err
-		}
-		return countStr(groups), nil
-	})
-
-	// CreateFlexEGroup (只读测试 — 发送空 body 看服务端响应)
-	r.run("CreateFlexEGroup(空body→预期错误)", func() (string, error) {
-		result, err := c.CreateFlexEGroup(ctx, map[string]any{"name": "test-group-e2e"})
-		if err != nil {
-			return "", err
-		}
-		return countStr(result), nil
-	})
-
-	// UpdateFlexEGroup
-	r.run("UpdateFlexEGroup(空body→预期错误)", func() (string, error) {
-		err := c.UpdateFlexEGroup(ctx, map[string]any{"name": "test-group-e2e", "id": "nonexistent"})
-		if err != nil {
-			return "", err
-		}
-		return "OK", nil
-	})
-
-	// DeleteFlexEGroup
-	r.run("DeleteFlexEGroup(nonexistent→预期404)", func() (string, error) {
-		err := c.DeleteFlexEGroup(ctx, "nonexistent-id")
-		if err != nil {
-			return "", err
-		}
-		return "OK (意外成功)", nil
-	})
-
-	// FlexE Client
-	r.run("ListFlexEClients(groupId=test)", func() (string, error) {
-		clients, err := c.ListFlexEClients(ctx, "test-group-id")
-		if err != nil {
-			return "", err
-		}
-		return countStr(clients), nil
-	})
-
-	r.run("CreateFlexEClient(空body→预期错误)", func() (string, error) {
-		result, err := c.CreateFlexEClient(ctx, map[string]any{"name": "test-client-e2e"})
-		if err != nil {
-			return "", err
-		}
-		return countStr(result), nil
-	})
-
-	r.run("UpdateFlexEClient(空body→预期错误)", func() (string, error) {
-		err := c.UpdateFlexEClient(ctx, map[string]any{"name": "test-client-e2e"})
-		if err != nil {
-			return "", err
-		}
-		return "OK", nil
-	})
-
-	r.run("DeleteFlexEClient(nonexistent→预期404)", func() (string, error) {
-		err := c.DeleteFlexEClient(ctx, "nonexistent-id")
-		if err != nil {
-			return "", err
-		}
-		return "OK", nil
-	})
-
-	r.run("DownloadPortInfo", func() (string, error) {
-		text, err := c.DownloadPortInfo(ctx)
-		if err != nil {
-			return "", err
-		}
-		return countStr(text), nil
-	})
-
-	// Sub-Interface Slicing
-	r.run("ListSubInterfaceSlicings", func() (string, error) {
-		items, err := c.ListSubInterfaceSlicings(ctx, "", "")
-		if err != nil {
-			return "", err
-		}
-		return countStr(items), nil
-	})
-
-	r.run("CreateSubInterfaceSlicing(空body→预期错误)", func() (string, error) {
-		result, err := c.CreateSubInterfaceSlicing(ctx, map[string]any{"name": "test-slicing-e2e"})
-		if err != nil {
-			return "", err
-		}
-		return countStr(result), nil
-	})
-
-	r.run("UpdateSubInterfaceSlicing(空body→预期错误)", func() (string, error) {
-		err := c.UpdateSubInterfaceSlicing(ctx, map[string]any{"name": "test-slicing-e2e"})
-		if err != nil {
-			return "", err
-		}
-		return "OK", nil
-	})
-
-	r.run("DeleteSubInterfaceSlicing(nonexistent→预期404)", func() (string, error) {
-		err := c.DeleteSubInterfaceSlicing(ctx, "nonexistent-id")
-		if err != nil {
-			return "", err
-		}
-		return "OK", nil
-	})
-
-	// SRv6 Slice
-	r.run("ListSRv6Slices", func() (string, error) {
-		slices, err := c.ListSRv6Slices(ctx, "", "")
-		if err != nil {
-			return "", err
-		}
-		return countStr(slices), nil
-	})
-
-	r.run("ListSRv6Slices(device=过滤)", func() (string, error) {
-		slices, err := c.ListSRv6Slices(ctx, "", "NJ-SCT-R01")
-		if err != nil {
-			return "", err
-		}
-		return countStr(slices), nil
-	})
-
-	r.run("CreateSRv6Slice(空body→预期错误)", func() (string, error) {
-		result, err := c.CreateSRv6Slice(ctx, map[string]any{"name": "test-srv6-e2e"})
-		if err != nil {
-			return "", err
-		}
-		return countStr(result), nil
-	})
-
-	r.run("UpdateSRv6Slice(空body→预期错误)", func() (string, error) {
-		err := c.UpdateSRv6Slice(ctx, map[string]any{"name": "test-srv6-e2e"})
-		if err != nil {
-			return "", err
-		}
-		return "OK", nil
-	})
-
-	r.run("DeleteSRv6Slice(nonexistent→预期404)", func() (string, error) {
-		err := c.DeleteSRv6Slice(ctx, "nonexistent-id")
-		if err != nil {
-			return "", err
-		}
-		return "OK", nil
-	})
-}
-
-// ══════════════════════════════════════════════════════════
-// 5. SR-TE API 测试
+// 4. SR-TE API 测试
 // ══════════════════════════════════════════════════════════
 
 func testSRTEAPIs(r *testRunner, c *controller.ControllerClient, ctx context.Context) {
@@ -682,61 +509,7 @@ func testSRTEAPIs(r *testRunner, c *controller.ControllerClient, ctx context.Con
 }
 
 // ══════════════════════════════════════════════════════════
-// 6. 确定性网络 API 测试
-// ══════════════════════════════════════════════════════════
-
-func testDetNetAPIs(r *testRunner, c *controller.ControllerClient, ctx context.Context) {
-	r.run("ListDetNetInstances", func() (string, error) {
-		instances, err := c.ListDetNetInstances(ctx)
-		if err != nil {
-			return "", err
-		}
-		return countStr(instances), nil
-	})
-
-	r.run("CreateDetNetInstance(空body→预期错误)", func() (string, error) {
-		result, err := c.CreateDetNetInstance(ctx, map[string]any{"name": "test-detnet-e2e"})
-		if err != nil {
-			return "", err
-		}
-		return countStr(result), nil
-	})
-
-	r.run("UpdateDetNetInstance(nonexistent→预期404)", func() (string, error) {
-		err := c.UpdateDetNetInstance(ctx, "nonexistent-id", map[string]any{"name": "test"})
-		if err != nil {
-			return "", err
-		}
-		return "OK", nil
-	})
-
-	r.run("DeleteDetNetInstance(nonexistent→预期404)", func() (string, error) {
-		err := c.DeleteDetNetInstance(ctx, "nonexistent-id")
-		if err != nil {
-			return "", err
-		}
-		return "OK", nil
-	})
-
-	r.run("FetchDetNetOAMData(instance=test,interval=60)", func() (string, error) {
-		data, err := c.FetchDetNetOAMData(ctx, "test-instance", 60)
-		if err != nil {
-			return "", err
-		}
-		return countStr(data), nil
-	})
-
-	r.run("RestartDetNetTimeslot(nonexistent→预期错误)", func() (string, error) {
-		err := c.RestartDetNetTimeslot(ctx, "nonexistent-instance")
-		if err != nil {
-			return "", err
-		}
-		return "OK", nil
-	})
-}
-
-// ══════════════════════════════════════════════════════════
-// 7. MonitorQuerier 委托调用测试
+// 5. MonitorQuerier 委托调用测试
 // ══════════════════════════════════════════════════════════
 
 func testMonitorQuerier(r *testRunner, conn *controller.ControllerConnector, ctx context.Context,
@@ -804,7 +577,7 @@ func testMonitorQuerier(r *testRunner, conn *controller.ControllerConnector, ctx
 }
 
 // ══════════════════════════════════════════════════════════
-// 8. DeviceOperator 委托调用测试
+// 6. DeviceOperator 委托调用测试
 // ══════════════════════════════════════════════════════════
 
 func testDeviceOperator(r *testRunner, conn *controller.ControllerConnector, ctx context.Context, device string) {
@@ -846,30 +619,6 @@ func testDeviceOperator(r *testRunner, conn *controller.ControllerConnector, ctx
 			return "", err
 		}
 		return countStr(routes), nil
-	})
-
-	r.run("ListFlexEGroups(DeviceOperator)", func() (string, error) {
-		groups, err := conn.ListFlexEGroups(ctx, connector.FilterOptions{})
-		if err != nil {
-			return "", err
-		}
-		return countStr(groups), nil
-	})
-
-	r.run("ListSRv6Slices(DeviceOperator)", func() (string, error) {
-		slices, err := conn.ListSRv6Slices(ctx, connector.FilterOptions{})
-		if err != nil {
-			return "", err
-		}
-		return countStr(slices), nil
-	})
-
-	r.run("ListDetNetInstances(DeviceOperator)", func() (string, error) {
-		instances, err := conn.ListDetNetInstances(ctx)
-		if err != nil {
-			return "", err
-		}
-		return countStr(instances), nil
 	})
 
 	r.run("QueryTopologyLive(DeviceOperator)", func() (string, error) {
