@@ -256,12 +256,64 @@ Area address(es): 49.0001
 		})
 	})
 
+	// POP 点列表接口
+	mux.HandleFunc("/api/no/config/terra-pe:peInfos/popInfos", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode([]map[string]any{
+			{"pop-id": "pop-001", "pop-name": "NJ-POP01", "location": "Nanjing"},
+		})
+	})
+
+	// 厂商型号接口
+	mux.HandleFunc("/api/no/config/terra-pe:peInfos/getAllVendorProdModel", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode([]map[string]any{
+			{"vendor": "H3C", "model": "CR16000-F"},
+			{"vendor": "ZTE", "model": "ZXR10 9908"},
+		})
+	})
+
+	// 分页设备接口
+	mux.HandleFunc("/api/no/config/terra-pe:peInfos/page", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"page_num": 1, "page_size": 10, "total_elements": 1, "total_pages": 1,
+			"content": []map[string]any{
+				{"id": "dev-paged-001", "name": "PAGED-PE01", "vendor-id": "H3C"},
+			},
+		})
+	})
+
+	// VPN Config Restconf 接口
+	mux.HandleFunc("/restconf/operations/oper-rpc:vpn-config", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"output": map[string]any{"current-config-result": "vpn-config-output"},
+		})
+	})
+
+	// Current Config Restconf 接口
+	mux.HandleFunc("/restconf/operations/oper-rpc:current-config", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"output": map[string]any{"current-config-result": "current-config-output"},
+		})
+	})
+
+	// Global Route Restconf 接口
+	mux.HandleFunc("/restconf/operations/oper-rpc:global-route", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"output": map[string]any{"current-config-result": "global-route-output"},
+		})
+	})
+
 	return httptest.NewServer(mux)
 }
 
 // newTestConnector 创建指向 mock server 的测试用 ControllerConnector。
 func newTestConnector(t *testing.T, serverURL string) *ControllerConnector {
-	client := connector.NewHTTPClient(
+	httpClient := connector.NewHTTPClient(
 		connector.WithBaseURL(serverURL),
 		connector.WithAuth(connector.AuthConfig{Type: "bearer", Token: "mock-token"}),
 	)
@@ -272,8 +324,10 @@ func newTestConnector(t *testing.T, serverURL string) *ControllerConnector {
 		"password":  "test123",
 		"device_id": "test-device-id",
 	}
+	client := NewControllerClient("test-controller", httpClient, cfg)
 	return NewControllerConnector("test-controller", client,
-		[]string{"Device", "Interface", "Link", "Alarm", "VPN", "Tunnel", "ISIS", "BGP"}, cfg)
+		[]string{"Device", "Interface", "Link", "Alarm", "VPN", "Tunnel", "ISIS", "BGP"},
+		serverURL)
 }
 
 // ──────────────────────────────
@@ -469,22 +523,7 @@ func TestStreamNotImplemented(t *testing.T) {
 	assert.ErrorIs(t, err, connector.ErrNotImplemented)
 }
 
-func TestEncryptPassword(t *testing.T) {
-	// 使用真实 Controller 的密钥和密码进行验证
-	secretKey := "9mng65v8jf4lxn93nabf981m"
-	password := "tgb.258"
-	expected := "gXpi7pWvZNA="
-
-	result, err := encryptPassword(secretKey, password)
-	require.NoError(t, err)
-	assert.Equal(t, expected, result, "3DES-CBC-SHA256 IV encryption mismatch")
-}
-
-func TestEncryptPasswordInvalidKeyLength(t *testing.T) {
-	_, err := encryptPassword("short", "password")
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "24 bytes")
-}
+// TestEncryptPassword 已迁移到 client_test.go
 
 // ──────────────────────────────
 // 错误路径测试 (TC-C15/C16/C17)
@@ -500,7 +539,7 @@ func TestCollect_AuthError(t *testing.T) {
 	server := httptest.NewServer(mux)
 	defer server.Close()
 
-	client := connector.NewHTTPClient(
+	httpClient := connector.NewHTTPClient(
 		connector.WithBaseURL(server.URL),
 		connector.WithAuth(connector.AuthConfig{Type: "bearer", Token: "bad-token"}),
 	)
@@ -511,7 +550,8 @@ func TestCollect_AuthError(t *testing.T) {
 		"password":  "bad-pass",
 		"device_id": "bad-device",
 	}
-	c := NewControllerConnector("test-auth-err", client, []string{"Device"}, cfg)
+	client := NewControllerClient("test-auth-err", httpClient, cfg)
+	c := NewControllerConnector("test-auth-err", client, []string{"Device"}, server.URL)
 
 	_, err := c.Collect(context.Background(), "Device")
 	require.Error(t, err)
@@ -560,7 +600,7 @@ func TestCollect_Timeout(t *testing.T) {
 
 // TestPing_Unreachable: server 不可达时 Ping 应返回错误。
 func TestPing_Unreachable(t *testing.T) {
-	client := connector.NewHTTPClient(
+	httpClient := connector.NewHTTPClient(
 		connector.WithBaseURL("http://127.0.0.1:1"), // 不可达端口
 		connector.WithAuth(connector.AuthConfig{Type: "bearer", Token: "tok"}),
 	)
@@ -571,7 +611,8 @@ func TestPing_Unreachable(t *testing.T) {
 		"password":  "p",
 		"device_id": "d",
 	}
-	c := NewControllerConnector("test-unreachable", client, []string{"Device"}, cfg)
+	client := NewControllerClient("test-unreachable", httpClient, cfg)
+	c := NewControllerConnector("test-unreachable", client, []string{"Device"}, "http://127.0.0.1:1")
 
 	err := c.Ping(context.Background())
 	require.Error(t, err)

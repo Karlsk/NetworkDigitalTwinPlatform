@@ -27,13 +27,18 @@ func Builder() connector.ConnectorBuilder {
 			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 		}
 
-		client := connector.NewHTTPClient(
+		httpClient := connector.NewHTTPClient(
 			connector.WithBaseURL(baseURL),
 			connector.WithTimeout(timeout),
 			connector.WithRateLimit(10),
 			connector.WithAuth(connector.AuthConfig{Type: "bearer"}),
 			connector.WithTransport(insecureTransport),
 		)
-		return NewControllerConnector(name, client, entityTypes, cfg), nil
+
+		// Step 1: 创建 ControllerClient（统一 API 适配层）
+		client := NewControllerClient(name, httpClient, cfg)
+
+		// Step 2: 创建 ControllerConnector（Collect 编排层）
+		return NewControllerConnector(name, client, entityTypes, baseURL), nil
 	}
 }

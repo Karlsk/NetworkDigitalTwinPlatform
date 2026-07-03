@@ -46,7 +46,7 @@ func main() {
 	httpTransport := &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 	}
-	client := connector.NewHTTPClient(
+	httpClient := connector.NewHTTPClient(
 		connector.WithBaseURL(baseURL),
 		connector.WithTimeout(60*time.Second),
 		connector.WithRateLimit(10),
@@ -54,11 +54,15 @@ func main() {
 		connector.WithTransport(httpTransport),
 	)
 
+	// Step 1: 创建 ControllerClient（统一 API 适配层）
+	apiClient := controller.NewControllerClient("controller-api-test", httpClient, cfg)
+
+	// Step 2: 创建 ControllerConnector（Collect 编排层）
 	conn := controller.NewControllerConnector(
 		"controller-api-test",
-		client,
+		apiClient,
 		[]string{"Device", "Interface", "Link", "Alarm", "VPN", "Tunnel", "ISIS", "BGP"},
-		cfg,
+		baseURL,
 	)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)

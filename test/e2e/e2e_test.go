@@ -742,12 +742,14 @@ func TestE2E_FullSyncWithRealConnectors(t *testing.T) {
 	})
 
 	// 注册 controller builder (使用 mock server URL)
-	controllerClient := connector.NewHTTPClient(
+	controllerHTTPClient := connector.NewHTTPClient(
 		connector.WithBaseURL(controllerServer.URL),
 		connector.WithAuth(connector.AuthConfig{Type: "bearer", Token: "mock-token"}),
 	)
 	factory.RegisterBuilder("controller", func(name string, cfg map[string]any, entityTypes []string) (connector.Connector, error) {
-		return controller.NewControllerConnector(name, controllerClient, entityTypes, cfg), nil
+		apiClient := controller.NewControllerClient(name, controllerHTTPClient, cfg)
+		baseURL, _ := cfg["base_url"].(string)
+		return controller.NewControllerConnector(name, apiClient, entityTypes, baseURL), nil
 	})
 
 	connReg := connector.NewConnectorRegistry()
