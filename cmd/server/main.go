@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"gitlab.com/pml/network-digital-twin/internal/assembler"
 	"gitlab.com/pml/network-digital-twin/internal/config"
@@ -99,8 +100,17 @@ func main() {
 			slog.Error("create kafka publisher", "error", err)
 			os.Exit(1)
 		}
-		// EventBus Kafka Consumer 在 V2-03 实现，当前使用 nopConsumer 占位
-		consumer = nopConsumer{}
+		// EventBus Consumer（V2-03）：与 Publisher 共享同一个 Topic
+		consumer, err = events.NewKafkaConsumer(
+			cfg.EventBus.Kafka.Brokers,
+			cfg.EventBus.Kafka.Topic,
+			cfg.EventBus.Kafka.GroupID,
+			saramaCfg,
+		)
+		if err != nil {
+			slog.Error("create kafka consumer", "error", err)
+			os.Exit(1)
+		}
 		slog.Info("event bus: Kafka mode",
 			"brokers", cfg.EventBus.Kafka.Brokers,
 			"topic", cfg.EventBus.Kafka.Topic,
@@ -111,8 +121,10 @@ func main() {
 		consumer = con
 		slog.Info("event bus: Channel mode", "buffer_size", cfg.Channel.BufferSize)
 	}
-	defer publisher.Close()
-	defer consumer.Close()
+
+	// 6.0.5 Graceful shutdown context（提前初始化，供 DataSource Consumer 使用）
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
 
 	// 6.1 初始化数据源层（DataSource Layer）
 	// 数据源层负责从外部系统接收事件，通过 publisher.Publish(event) 写入 EventBus。
@@ -123,8 +135,26 @@ func main() {
 			"brokers", cfg.Kafka.Brokers,
 			"topic", cfg.Kafka.Topic,
 		)
-		// TODO V2-03: 启动 Kafka DataSource Consumer
-		// dataSourceConsumer 消费外部 Kafka Topic → publisher.Publish(event)
+		// V2-03: 启动 Kafka DataSource Consumer
+		dsSaramaCfg, err := events.NewSaramaConfig(cfg.Kafka.SASLUser, cfg.Kafka.SASLPass)
+		if err != nil {
+			slog.Error("create data source sarama config", "error", err)
+			os.Exit(1)
+		}
+		dsConsumer, err := events.NewKafkaDataSourceConsumer(
+			cfg.Kafka.Brokers, cfg.Kafka.Topic, cfg.Kafka.GroupID, dsSaramaCfg,
+		)
+		if err != nil {
+			slog.Error("create kafka data source consumer", "error", err)
+			os.Exit(1)
+		}
+		defer dsConsumer.Close()
+		// 数据源消费者在后台运行：消费外部 Topic → publisher.Publish(event) → EventBus
+		go func() {
+			if err := dsConsumer.Start(ctx, publisher); err != nil && ctx.Err() == nil {
+				slog.Error("kafka data source consumer stopped", "error", err)
+			}
+		}()
 	}
 
 	// 7. 初始化 SyncService
@@ -148,16 +178,35 @@ func main() {
 	// 11. 构建 MCP Server 并注册工具
 	mcpServer := intmcp.NewNetworkTwinServer(analysisSvc, snapshotSvc, syncSvc, deviceSvc)
 
-	// 12. Graceful shutdown
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
-
-	// 13. 启动 Streamable HTTP MCP Server
+	// 12. 启动 Streamable HTTP MCP Server（goroutine）
 	addr := fmt.Sprintf(":%d", cfg.Server.Port)
-	if err := intmcp.RunHTTP(ctx, mcpServer, addr); err != nil {
-		slog.Error("MCP server error", "error", err)
-		os.Exit(1)
+	serverErr := make(chan error, 1)
+	go func() {
+		serverErr <- intmcp.RunHTTP(ctx, mcpServer, addr)
+	}()
+
+	// 13. 等待退出信号或服务器错误
+	select {
+	case <-ctx.Done():
+		slog.Info("received shutdown signal")
+	case err := <-serverErr:
+		if err != nil {
+			slog.Error("MCP server error", "error", err)
+		}
 	}
+
+	// 14. 优雅退出：先停 consumer，再停 publisher
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer shutdownCancel()
+
+	slog.Info("shutting down event bus...")
+	if err := consumer.Close(); err != nil {
+		slog.Error("close consumer", "error", err)
+	}
+	if err := publisher.Close(); err != nil {
+		slog.Error("close publisher", "error", err)
+	}
+	slog.Info("shutdown complete", "timeout", shutdownCtx)
 }
 
 // collectAllLabels 遍历所有 EntityType，收集包含基类在内的所有 Label（去重）。
@@ -174,12 +223,3 @@ func collectAllLabels(reg schema.SchemaRegistry) []string {
 	}
 	return labels
 }
-
-// nopConsumer 空操作 EventConsumer，EventBus Kafka 模式下 V2-03 实现前占位。
-type nopConsumer struct{}
-
-func (nopConsumer) Consume(ctx context.Context, _ func(ctx context.Context, event events.SyncEvent) error) error {
-	<-ctx.Done()
-	return ctx.Err()
-}
-func (nopConsumer) Close() error { return nil }
