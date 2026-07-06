@@ -27,6 +27,14 @@ schema:
 
 channel:
   buffer_size: 200
+
+kafka:
+  enabled: true
+  brokers: ["kafka1:9092", "kafka2:9092"]
+  topic: "test-events"
+  group_id: "test-group"
+  sasl_user: "testuser"
+  sasl_pass: "testpass"
 `
 
 // writeTempConfig 将内容写入临时目录并返回文件路径
@@ -87,6 +95,26 @@ func TestLoad_ValidConfig(t *testing.T) {
 	if cfg.Channel.BufferSize != 200 {
 		t.Errorf("Channel.BufferSize = %d, want %d", cfg.Channel.BufferSize, 200)
 	}
+
+	// Kafka
+	if !cfg.Kafka.Enabled {
+		t.Errorf("Kafka.Enabled = %v, want true", cfg.Kafka.Enabled)
+	}
+	if len(cfg.Kafka.Brokers) != 2 {
+		t.Errorf("Kafka.Brokers count = %d, want 2", len(cfg.Kafka.Brokers))
+	}
+	if cfg.Kafka.Topic != "test-events" {
+		t.Errorf("Kafka.Topic = %q, want %q", cfg.Kafka.Topic, "test-events")
+	}
+	if cfg.Kafka.GroupID != "test-group" {
+		t.Errorf("Kafka.GroupID = %q, want %q", cfg.Kafka.GroupID, "test-group")
+	}
+	if cfg.Kafka.SASLUser != "testuser" {
+		t.Errorf("Kafka.SASLUser = %q, want %q", cfg.Kafka.SASLUser, "testuser")
+	}
+	if cfg.Kafka.SASLPass != "testpass" {
+		t.Errorf("Kafka.SASLPass = %q, want %q", cfg.Kafka.SASLPass, "testpass")
+	}
 }
 
 func TestLoad_Defaults(t *testing.T) {
@@ -118,6 +146,16 @@ func TestLoad_Defaults(t *testing.T) {
 	}
 	if cfg.Channel.BufferSize != 100 {
 		t.Errorf("Channel.BufferSize default = %d, want %d", cfg.Channel.BufferSize, 100)
+	}
+	// Kafka defaults
+	if cfg.Kafka.Enabled != false {
+		t.Errorf("Kafka.Enabled default = %v, want false", cfg.Kafka.Enabled)
+	}
+	if cfg.Kafka.Topic != "sync-events" {
+		t.Errorf("Kafka.Topic default = %q, want %q", cfg.Kafka.Topic, "sync-events")
+	}
+	if cfg.Kafka.GroupID != "network-twin" {
+		t.Errorf("Kafka.GroupID default = %q, want %q", cfg.Kafka.GroupID, "network-twin")
 	}
 }
 

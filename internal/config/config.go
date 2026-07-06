@@ -15,6 +15,7 @@ type Config struct {
 	Snapshot SnapshotConfig `mapstructure:"snapshot"`
 	Schema   SchemaConfig   `mapstructure:"schema"`
 	Channel  ChannelConfig  `mapstructure:"channel"`
+	Kafka    KafkaConfig    `mapstructure:"kafka"`
 }
 
 // Neo4JConfig 是 Neo4j 连接配置
@@ -47,6 +48,17 @@ type ChannelConfig struct {
 	BufferSize int `mapstructure:"buffer_size"`
 }
 
+// KafkaConfig Kafka 连接配置。
+// Enabled=false 时使用内存 Channel（V1 兼容），Enabled=true 时使用 Kafka 持久化。
+type KafkaConfig struct {
+	Enabled  bool     `mapstructure:"enabled"`    // false = 使用内存 Channel
+	Brokers  []string `mapstructure:"brokers"`    // ["localhost:9092"]
+	Topic    string   `mapstructure:"topic"`      // "sync-events"
+	GroupID  string   `mapstructure:"group_id"`   // "network-twin"
+	SASLUser string   `mapstructure:"sasl_user"`  // 可选
+	SASLPass string   `mapstructure:"sasl_pass"`  // 可选
+}
+
 // Load 从 YAML 文件加载配置，支持环境变量覆盖
 // path: 配置文件路径（如 configs/config.yaml）
 func Load(path string) (*Config, error) {
@@ -62,6 +74,9 @@ func Load(path string) (*Config, error) {
 	v.SetDefault("snapshot.retention_days", 0) // V1-20: 默认不自动清理
 	v.SetDefault("schema.ontology_dir", "ontology")
 	v.SetDefault("channel.buffer_size", 100)
+	v.SetDefault("kafka.enabled", false)
+	v.SetDefault("kafka.topic", "sync-events")
+	v.SetDefault("kafka.group_id", "network-twin")
 
 	if err := v.ReadInConfig(); err != nil {
 		return nil, fmt.Errorf("read config %s: %w", path, err)

@@ -18,3 +18,9 @@ schema:
 
 channel:
   buffer_size: 100
+
+kafka:
+  enabled: false          # V2 默认关闭，逐步切换
+  brokers: ["localhost:9092"]
+  topic: "sync-events"
+  group_id: "network-twin"
