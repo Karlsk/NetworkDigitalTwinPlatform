@@ -14,6 +14,7 @@ import (
 	"gitlab.com/pml/network-digital-twin/internal/connector/controller"
 	"gitlab.com/pml/network-digital-twin/internal/connector/mock"
 	"gitlab.com/pml/network-digital-twin/internal/connector/netbox"
+	"gitlab.com/pml/network-digital-twin/internal/events"
 	"gitlab.com/pml/network-digital-twin/internal/graph"
 	"gitlab.com/pml/network-digital-twin/internal/normalizer"
 	"gitlab.com/pml/network-digital-twin/internal/schema"
@@ -77,7 +78,8 @@ func main() {
 	}
 
 	// 6. SyncService
-	syncSvc := service.NewSyncService(connRegistry, norm, asm, gdb, lock, cfg.Channel.BufferSize)
+	pub, con := events.NewChannelEventBus(cfg.Channel.BufferSize)
+	syncSvc := service.NewSyncService(connRegistry, norm, asm, gdb, lock, pub, con)
 
 	// 7. FullSync
 	fmt.Println("\n▶ Starting FullSync...")

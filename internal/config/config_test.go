@@ -35,6 +35,15 @@ kafka:
   group_id: "test-group"
   sasl_user: "testuser"
   sasl_pass: "testpass"
+
+event_bus:
+  mode: "kafka"
+  kafka:
+    brokers: ["eb-kafka1:9092"]
+    topic: "eb-events"
+    group_id: "eb-group"
+    sasl_user: "eb-user"
+    sasl_pass: "eb-pass"
 `
 
 // writeTempConfig 将内容写入临时目录并返回文件路径
@@ -96,7 +105,7 @@ func TestLoad_ValidConfig(t *testing.T) {
 		t.Errorf("Channel.BufferSize = %d, want %d", cfg.Channel.BufferSize, 200)
 	}
 
-	// Kafka
+	// Kafka (DataSource Layer)
 	if !cfg.Kafka.Enabled {
 		t.Errorf("Kafka.Enabled = %v, want true", cfg.Kafka.Enabled)
 	}
@@ -109,11 +118,19 @@ func TestLoad_ValidConfig(t *testing.T) {
 	if cfg.Kafka.GroupID != "test-group" {
 		t.Errorf("Kafka.GroupID = %q, want %q", cfg.Kafka.GroupID, "test-group")
 	}
-	if cfg.Kafka.SASLUser != "testuser" {
-		t.Errorf("Kafka.SASLUser = %q, want %q", cfg.Kafka.SASLUser, "testuser")
+
+	// EventBus Layer
+	if cfg.EventBus.Mode != "kafka" {
+		t.Errorf("EventBus.Mode = %q, want %q", cfg.EventBus.Mode, "kafka")
 	}
-	if cfg.Kafka.SASLPass != "testpass" {
-		t.Errorf("Kafka.SASLPass = %q, want %q", cfg.Kafka.SASLPass, "testpass")
+	if len(cfg.EventBus.Kafka.Brokers) != 1 {
+		t.Errorf("EventBus.Kafka.Brokers count = %d, want 1", len(cfg.EventBus.Kafka.Brokers))
+	}
+	if cfg.EventBus.Kafka.Topic != "eb-events" {
+		t.Errorf("EventBus.Kafka.Topic = %q, want %q", cfg.EventBus.Kafka.Topic, "eb-events")
+	}
+	if cfg.EventBus.Kafka.GroupID != "eb-group" {
+		t.Errorf("EventBus.Kafka.GroupID = %q, want %q", cfg.EventBus.Kafka.GroupID, "eb-group")
 	}
 }
 
@@ -147,7 +164,7 @@ func TestLoad_Defaults(t *testing.T) {
 	if cfg.Channel.BufferSize != 100 {
 		t.Errorf("Channel.BufferSize default = %d, want %d", cfg.Channel.BufferSize, 100)
 	}
-	// Kafka defaults
+	// Kafka defaults (DataSource Layer)
 	if cfg.Kafka.Enabled != false {
 		t.Errorf("Kafka.Enabled default = %v, want false", cfg.Kafka.Enabled)
 	}
@@ -156,6 +173,16 @@ func TestLoad_Defaults(t *testing.T) {
 	}
 	if cfg.Kafka.GroupID != "network-twin" {
 		t.Errorf("Kafka.GroupID default = %q, want %q", cfg.Kafka.GroupID, "network-twin")
+	}
+	// EventBus defaults
+	if cfg.EventBus.Mode != "channel" {
+		t.Errorf("EventBus.Mode default = %q, want %q", cfg.EventBus.Mode, "channel")
+	}
+	if cfg.EventBus.Kafka.Topic != "sync-events" {
+		t.Errorf("EventBus.Kafka.Topic default = %q, want %q", cfg.EventBus.Kafka.Topic, "sync-events")
+	}
+	if cfg.EventBus.Kafka.GroupID != "network-twin" {
+		t.Errorf("EventBus.Kafka.GroupID default = %q, want %q", cfg.EventBus.Kafka.GroupID, "network-twin")
 	}
 }
 

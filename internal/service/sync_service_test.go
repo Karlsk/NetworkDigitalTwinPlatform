@@ -12,10 +12,32 @@ import (
 	"gitlab.com/pml/network-digital-twin/internal/assembler"
 	"gitlab.com/pml/network-digital-twin/internal/connector"
 	"gitlab.com/pml/network-digital-twin/internal/connector/mock"
+	"gitlab.com/pml/network-digital-twin/internal/events"
 	"gitlab.com/pml/network-digital-twin/internal/normalizer"
 	"gitlab.com/pml/network-digital-twin/internal/schema"
 	"gitlab.com/pml/network-digital-twin/internal/snapshot"
 )
+
+// nopEventBus 空操作事件总线，同时提供 EventPublisher 和 EventConsumer（用于不需要事件流的测试）。
+type nopEventBus struct{}
+
+func (nopEventBus) Publish(_ context.Context, _ events.SyncEvent) error { return nil }
+func (nopEventBus) Close() error                                        { return nil }
+func (nopEventBus) Consume(ctx context.Context, handler func(ctx context.Context, event events.SyncEvent) error) error {
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+// testEventBus 基于 Channel 的事件总线测试辅助（用于 HandleWebhook / StartConsumer 测试）。
+type testEventBus struct {
+	pub  events.EventPublisher
+	con  events.EventConsumer
+}
+
+func newTestEventBus(bufferSize int) *testEventBus {
+	pub, con := events.NewChannelEventBus(bufferSize)
+	return &testEventBus{pub: pub, con: con}
+}
 
 func TestSyncResultFields(t *testing.T) {
 	sr := SyncResult{
@@ -125,7 +147,7 @@ func TestNewSyncService(t *testing.T) {
 	gdb := &mockGraphDB{}
 	lock := snapshot.NewGraphLock()
 
-	svc := NewSyncService(reg, norm, asm, gdb, lock, 10)
+	svc := NewSyncService(reg, norm, asm, gdb, lock, nopEventBus{}, nopEventBus{})
 	if svc == nil {
 		t.Fatal("NewSyncService() returned nil")
 	}
@@ -153,7 +175,7 @@ func TestFullSync_Success(t *testing.T) {
 	gdb := &mockGraphDB{}
 	lock := snapshot.NewGraphLock()
 
-	svc := NewSyncService(registry, norm, asm, gdb, lock, 10)
+	svc := NewSyncService(registry, norm, asm, gdb, lock, nopEventBus{}, nopEventBus{})
 	result, err := svc.FullSync(context.Background())
 
 	if err != nil {
@@ -229,7 +251,7 @@ func TestFullSync_ConnectorFailureTolerance(t *testing.T) {
 	gdb := &mockGraphDB{}
 	lock := snapshot.NewGraphLock()
 
-	svc := NewSyncService(registry, norm, asm, gdb, lock, 10)
+	svc := NewSyncService(registry, norm, asm, gdb, lock, nopEventBus{}, nopEventBus{})
 	result, err := svc.FullSync(context.Background())
 
 	// 不应返回错误（单个 Connector 失败被容忍）
@@ -272,7 +294,7 @@ func TestFullSync_NormalizerFailureTolerance(t *testing.T) {
 	gdb := &mockGraphDB{}
 	lock := snapshot.NewGraphLock()
 
-	svc := NewSyncService(registry, norm, asm, gdb, lock, 10)
+	svc := NewSyncService(registry, norm, asm, gdb, lock, nopEventBus{}, nopEventBus{})
 	result, err := svc.FullSync(context.Background())
 
 	// 不应返回错误（UnknownType 被 Normalizer 跳过）
@@ -298,7 +320,7 @@ func TestFullSync_ClearDBError(t *testing.T) {
 	asm := assembler.NewGraphAssembler(reg)
 	lock := snapshot.NewGraphLock()
 
-	svc := NewSyncService(registry, norm, asm, gdb, lock, 10)
+	svc := NewSyncService(registry, norm, asm, gdb, lock, nopEventBus{}, nopEventBus{})
 	_, err := svc.FullSync(context.Background())
 
 	// 应返回错误
@@ -342,7 +364,7 @@ func TestFullSync_BulkCreateError(t *testing.T) {
 	asm := assembler.NewGraphAssembler(reg)
 	lock := snapshot.NewGraphLock()
 
-	svc := NewSyncService(registry, norm, asm, gdb, lock, 10)
+	svc := NewSyncService(registry, norm, asm, gdb, lock, nopEventBus{}, nopEventBus{})
 	_, err := svc.FullSync(context.Background())
 
 	// 应返回错误
@@ -401,7 +423,7 @@ func TestFullSync_ConcurrentMutualExclusion(t *testing.T) {
 	asm := assembler.NewGraphAssembler(reg)
 	lock := snapshot.NewGraphLock()
 
-	svc := NewSyncService(registry, norm, asm, gdb, lock, 10)
+	svc := NewSyncService(registry, norm, asm, gdb, lock, nopEventBus{}, nopEventBus{})
 
 	// 启动两个 goroutine 同时调用 FullSync
 	done := make(chan error, 2)
@@ -477,7 +499,7 @@ func TestFullSync_LockReleaseOnError(t *testing.T) {
 	asm := assembler.NewGraphAssembler(reg)
 	lock := snapshot.NewGraphLock()
 
-	svc := NewSyncService(registry, norm, asm, gdb, lock, 10)
+	svc := NewSyncService(registry, norm, asm, gdb, lock, nopEventBus{}, nopEventBus{})
 	_, err := svc.FullSync(context.Background())
 
 	// 确认 FullSync 返回错误
@@ -513,7 +535,7 @@ func TestFullSync_EmptyRegistry(t *testing.T) {
 	gdb := &mockGraphDB{}
 	lock := snapshot.NewGraphLock()
 
-	svc := NewSyncService(registry, norm, asm, gdb, lock, 10)
+	svc := NewSyncService(registry, norm, asm, gdb, lock, nopEventBus{}, nopEventBus{})
 	result, err := svc.FullSync(context.Background())
 
 	// 不应返回错误
@@ -549,7 +571,7 @@ func TestIncrementalSync_Update_Success(t *testing.T) {
 	gdb := &mockGraphDB{}
 	lock := snapshot.NewGraphLock()
 
-	svc := NewSyncService(registry, norm, asm, gdb, lock, 10)
+	svc := NewSyncService(registry, norm, asm, gdb, lock, nopEventBus{}, nopEventBus{})
 
 	event := SyncEvent{
 		Action:     "update",
@@ -585,7 +607,7 @@ func TestIncrementalSync_Delete_Success(t *testing.T) {
 	gdb := &mockGraphDB{}
 	lock := snapshot.NewGraphLock()
 
-	svc := NewSyncService(registry, norm, asm, gdb, lock, 10)
+	svc := NewSyncService(registry, norm, asm, gdb, lock, nopEventBus{}, nopEventBus{})
 
 	event := SyncEvent{
 		Action: "delete",
@@ -621,7 +643,7 @@ func TestIncrementalSync_DeleteRelation_Success(t *testing.T) {
 	gdb := &mockGraphDB{}
 	lock := snapshot.NewGraphLock()
 
-	svc := NewSyncService(registry, norm, asm, gdb, lock, 10)
+	svc := NewSyncService(registry, norm, asm, gdb, lock, nopEventBus{}, nopEventBus{})
 
 	event := SyncEvent{
 		Action: "delete_relation",
@@ -656,7 +678,7 @@ func TestIncrementalSync_UnknownAction(t *testing.T) {
 	gdb := &mockGraphDB{}
 	lock := snapshot.NewGraphLock()
 
-	svc := NewSyncService(registry, norm, asm, gdb, lock, 10)
+	svc := NewSyncService(registry, norm, asm, gdb, lock, nopEventBus{}, nopEventBus{})
 
 	event := SyncEvent{Action: "invalid_action"}
 	_, err := svc.IncrementalSync(context.Background(), event)
@@ -675,7 +697,7 @@ func TestIncrementalSync_NormalizerFailureTolerance(t *testing.T) {
 	gdb := &mockGraphDB{}
 	lock := snapshot.NewGraphLock()
 
-	svc := NewSyncService(registry, norm, asm, gdb, lock, 10)
+	svc := NewSyncService(registry, norm, asm, gdb, lock, nopEventBus{}, nopEventBus{})
 
 	event := SyncEvent{
 		Action:     "update",
@@ -709,7 +731,7 @@ func TestIncrementalSync_UpsertError(t *testing.T) {
 	asm := assembler.NewGraphAssembler(reg)
 	lock := snapshot.NewGraphLock()
 
-	svc := NewSyncService(registry, norm, asm, gdb, lock, 10)
+	svc := NewSyncService(registry, norm, asm, gdb, lock, nopEventBus{}, nopEventBus{})
 
 	event := SyncEvent{
 		Action:     "update",
@@ -740,7 +762,7 @@ func TestIncrementalSync_DeleteByURIsError(t *testing.T) {
 	asm := assembler.NewGraphAssembler(reg)
 	lock := snapshot.NewGraphLock()
 
-	svc := NewSyncService(registry, norm, asm, gdb, lock, 10)
+	svc := NewSyncService(registry, norm, asm, gdb, lock, nopEventBus{}, nopEventBus{})
 
 	event := SyncEvent{
 		Action: "delete",
@@ -768,7 +790,7 @@ func TestIncrementalSync_DeleteRelationsError(t *testing.T) {
 	asm := assembler.NewGraphAssembler(reg)
 	lock := snapshot.NewGraphLock()
 
-	svc := NewSyncService(registry, norm, asm, gdb, lock, 10)
+	svc := NewSyncService(registry, norm, asm, gdb, lock, nopEventBus{}, nopEventBus{})
 
 	event := SyncEvent{
 		Action: "delete_relation",
@@ -800,26 +822,17 @@ func TestHandleWebhook_EnqueueSuccess(t *testing.T) {
 	gdb := &mockGraphDB{}
 	lock := snapshot.NewGraphLock()
 
-	svc := NewSyncService(registry, norm, asm, gdb, lock, 2)
+	bus := newTestEventBus(2)
+	svc := NewSyncService(registry, norm, asm, gdb, lock, bus.pub, bus.con)
 
-	event := SyncEvent{Action: "delete", URIs: []string{"device:SN001"}}
-	err := svc.HandleWebhook(event)
+	event := events.SyncEvent{Action: "delete", URIs: []string{"device:SN001"}}
+	err := svc.HandleWebhook(context.Background(), event)
 	if err != nil {
 		t.Fatalf("HandleWebhook() error = %v, want nil", err)
 	}
-
-	// 验证事件在 channel 中
-	select {
-	case received := <-svc.eventChan:
-		if received.Action != "delete" {
-			t.Errorf("received action = %q, want delete", received.Action)
-		}
-	default:
-		t.Fatal("event not found in channel")
-	}
 }
 
-// TestHandleWebhook_ChannelFull 验证 channel 满时返回 error。
+// TestHandleWebhook_ChannelFull 验证 publisher 通道满时返回 error。
 func TestHandleWebhook_ChannelFull(t *testing.T) {
 	reg := loadTestOntology(t)
 
@@ -829,13 +842,15 @@ func TestHandleWebhook_ChannelFull(t *testing.T) {
 	gdb := &mockGraphDB{}
 	lock := snapshot.NewGraphLock()
 
-	svc := NewSyncService(registry, norm, asm, gdb, lock, 1)
+	// buffer=1 的共享通道，不启动 consumer，填满后 Publish 返回 error
+	bus := newTestEventBus(1)
+	svc := NewSyncService(registry, norm, asm, gdb, lock, bus.pub, bus.con)
 
-	// 填满 channel
-	svc.eventChan <- SyncEvent{Action: "delete"}
+	// 填满共享通道
+	_ = bus.pub.Publish(context.Background(), events.SyncEvent{Action: "delete"})
 
-	// 再次入队应失败
-	err := svc.HandleWebhook(SyncEvent{Action: "delete"})
+	// 再次 Publish 应失败
+	err := svc.HandleWebhook(context.Background(), events.SyncEvent{Action: "delete"})
 	if err == nil {
 		t.Fatal("HandleWebhook() should return error when channel is full")
 	}
@@ -855,16 +870,17 @@ func TestStartConsumer_ProcessesEvents(t *testing.T) {
 	gdb := &mockGraphDB{}
 	lock := snapshot.NewGraphLock()
 
-	svc := NewSyncService(registry, norm, asm, gdb, lock, 10)
+	bus := newTestEventBus(10)
+	svc := NewSyncService(registry, norm, asm, gdb, lock, bus.pub, bus.con)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	svc.StartConsumer(ctx)
 
-	// 发送 2 个 delete 事件
-	svc.eventChan <- SyncEvent{Action: "delete", URIs: []string{"device:SN001"}}
-	svc.eventChan <- SyncEvent{Action: "delete", URIs: []string{"device:SN002"}}
+	// 通过 publisher 发送 2 个 delete 事件到共享通道
+	bus.pub.Publish(context.Background(), events.SyncEvent{Action: "delete", URIs: []string{"device:SN001"}})
+	bus.pub.Publish(context.Background(), events.SyncEvent{Action: "delete", URIs: []string{"device:SN002"}})
 
 	// 等待处理完成
 	deadline := time.After(2 * time.Second)
@@ -910,16 +926,17 @@ func TestStartConsumer_SerialProcessing(t *testing.T) {
 	asm := assembler.NewGraphAssembler(reg)
 	lock := snapshot.NewGraphLock()
 
-	svc := NewSyncService(registry, norm, asm, gdb, lock, 10)
+	bus := newTestEventBus(10)
+	svc := NewSyncService(registry, norm, asm, gdb, lock, bus.pub, bus.con)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	svc.StartConsumer(ctx)
 
-	// 发送 3 个事件
+	// 通过 publisher 发送 3 个事件到共享通道
 	for i := 0; i < 3; i++ {
-		svc.eventChan <- SyncEvent{Action: "delete", URIs: []string{"device:SN00" + string(rune('1'+i))}}
+		bus.pub.Publish(context.Background(), events.SyncEvent{Action: "delete", URIs: []string{"device:SN00" + string(rune('1'+i))}})
 	}
 
 	// 等待处理完成
@@ -959,14 +976,15 @@ func TestStartConsumer_LockAcquiredPerEvent(t *testing.T) {
 	asm := assembler.NewGraphAssembler(reg)
 	lock := snapshot.NewGraphLock()
 
-	svc := NewSyncService(registry, norm, asm, gdb, lock, 10)
+	bus := newTestEventBus(10)
+	svc := NewSyncService(registry, norm, asm, gdb, lock, bus.pub, bus.con)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	svc.StartConsumer(ctx)
 
-	svc.eventChan <- SyncEvent{Action: "delete", URIs: []string{"device:SN001"}}
+	bus.pub.Publish(context.Background(), events.SyncEvent{Action: "delete", URIs: []string{"device:SN001"}})
 
 	// 等待事件开始处理
 	select {
@@ -1009,7 +1027,8 @@ func TestStartConsumer_StopsOnContextCancel(t *testing.T) {
 	gdb := &mockGraphDB{}
 	lock := snapshot.NewGraphLock()
 
-	svc := NewSyncService(registry, norm, asm, gdb, lock, 10)
+	bus := newTestEventBus(10)
+	svc := NewSyncService(registry, norm, asm, gdb, lock, bus.pub, bus.con)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	svc.StartConsumer(ctx)
@@ -1017,12 +1036,11 @@ func TestStartConsumer_StopsOnContextCancel(t *testing.T) {
 	// 取消 context
 	cancel()
 
-	// 消费者应在短时间内停止（通过检测 channel 关闭后 goroutine 退出）
-	// 无法直接检测 goroutine 退出，但可以通过发送事件来验证消费者不再处理
+	// 消费者应在短时间内停止（Consume 返回 context.Canceled）
 	time.Sleep(50 * time.Millisecond)
 
-	// 发送事件到 channel（此时无消费者处理）
-	svc.eventChan <- SyncEvent{Action: "delete", URIs: []string{"device:SN001"}}
+	// 通过 publisher 发送事件（consumer 已停止，不会处理）
+	bus.pub.Publish(context.Background(), events.SyncEvent{Action: "delete", URIs: []string{"device:SN001"}})
 
 	// 等待一小段时间，验证事件未被处理
 	time.Sleep(100 * time.Millisecond)

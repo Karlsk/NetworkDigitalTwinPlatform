@@ -21,6 +21,7 @@ import (
 	"gitlab.com/pml/network-digital-twin/internal/config"
 	"gitlab.com/pml/network-digital-twin/internal/connector"
 	"gitlab.com/pml/network-digital-twin/internal/connector/mock"
+	"gitlab.com/pml/network-digital-twin/internal/events"
 	"gitlab.com/pml/network-digital-twin/internal/graph"
 	"gitlab.com/pml/network-digital-twin/internal/normalizer"
 	"gitlab.com/pml/network-digital-twin/internal/schema"
@@ -226,7 +227,8 @@ func newE2ESyncService(t *testing.T, client graph.GraphDB, lock *snapshot.GraphL
 
 	norm := normalizer.NewNormalizer(reg)
 	asm := assembler.NewGraphAssembler(reg)
-	return service.NewSyncService(registry, norm, asm, client, lock, 20)
+	pub, con := events.NewChannelEventBus(20)
+	return service.NewSyncService(registry, norm, asm, client, lock, pub, con)
 }
 
 // newE2ESnapshotManager 创建 SnapshotManager，与 SyncService 共享 GraphLock。

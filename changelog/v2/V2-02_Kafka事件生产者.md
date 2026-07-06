@@ -12,6 +12,9 @@
 V2-01 定义了 `EventPublisher` 接口和 Channel 内存实现。本任务实现 Kafka Producer，
 并改造 `SyncService.HandleWebhook` 使用 `EventPublisher` 接口替代直接写入 channel。
 
+**两层架构**: 本任务属于**事件总线层（EventBus Layer）** 的实现。
+事件总线层与数据源层独立，详见 [事件总线两层架构设计](../../docs/事件总线两层架构设计.md)。
+
 ### 改造前
 
 ```go
@@ -198,6 +201,7 @@ func (s *SyncService) StartConsumer(ctx context.Context) {
         if err != nil && !errors.Is(err, context.Canceled) {
             slog.Error("consumer stopped with error", "error", err)
         }
+        slog.Info("consumer stopped")
     }()
 }
 ```
@@ -207,33 +211,42 @@ func (s *SyncService) StartConsumer(ctx context.Context) {
 修改 `cmd/server/main.go`：
 
 ```go
-// 根据配置选择 Publisher/Consumer 实现
+// 初始化事件总线层（EventBus Layer）
+// cfg.EventBus.Mode 决定 EventBus 实现：
+//   - "channel": 内存 Channel（默认，V1 兼容）
+//   - "kafka":   Kafka Topic（持久化）
 var publisher events.EventPublisher
 var consumer events.EventConsumer
 
-if cfg.Kafka.Enabled {
-    saramaCfg, err := events.NewSaramaConfig(cfg.Kafka.SASLUser, cfg.Kafka.SASLPass)
+switch cfg.EventBus.Mode {
+case "kafka":
+    saramaCfg, err := events.NewSaramaConfig(cfg.EventBus.Kafka.SASLUser, cfg.EventBus.Kafka.SASLPass)
     if err != nil {
         slog.Error("create sarama config", "error", err)
         os.Exit(1)
     }
-    publisher, err = events.NewKafkaPublisher(cfg.Kafka.Brokers, cfg.Kafka.Topic, saramaCfg)
+    publisher, err = events.NewKafkaPublisher(
+        cfg.EventBus.Kafka.Brokers, cfg.EventBus.Kafka.Topic, saramaCfg,
+    )
     if err != nil {
         slog.Error("create kafka publisher", "error", err)
         os.Exit(1)
     }
-    consumer, err = events.NewKafkaConsumer(cfg.Kafka.Brokers, cfg.Kafka.Topic, cfg.Kafka.GroupID, saramaCfg)
-    if err != nil {
-        slog.Error("create kafka consumer", "error", err)
-        os.Exit(1)
-    }
-    slog.Info("using Kafka event bus", "brokers", cfg.Kafka.Brokers, "topic", cfg.Kafka.Topic)
-} else {
-    bufSize := cfg.Channel.BufferSize
-    ch := make(chan events.SyncEvent, bufSize)
-    publisher = events.NewChannelPublisher(bufSize)
-    consumer = events.NewChannelConsumer(bufSize)
-    slog.Info("using in-memory channel event bus", "buffer_size", bufSize)
+    // EventBus Kafka Consumer 在 V2-03 实现，当前使用 nopConsumer 占位
+    consumer = nopConsumer{}
+    slog.Info("event bus: Kafka mode",
+        "brokers", cfg.EventBus.Kafka.Brokers, "topic", cfg.EventBus.Kafka.Topic)
+default: // "channel"
+    publisher, consumer = events.NewChannelEventBus(cfg.Channel.BufferSize)
+    slog.Info("event bus: Channel mode", "buffer_size", cfg.Channel.BufferSize)
+}
+
+// 初始化数据源层（DataSource Layer）
+// cfg.Kafka.Enabled 控制是否启动 Kafka DataSource Consumer
+if cfg.Kafka.Enabled {
+    slog.Info("data source: Kafka enabled",
+        "brokers", cfg.Kafka.Brokers, "topic", cfg.Kafka.Topic)
+    // TODO V2-03: 启动 Kafka DataSource Consumer → publisher.Publish(event)
 }
 
 syncSvc := service.NewSyncService(connRegistry, norm, asm, gdb, lock, publisher, consumer)
@@ -268,7 +281,8 @@ syncSvc := service.NewSyncService(connRegistry, norm, asm, gdb, lock, publisher,
 1. **SyncProducer vs AsyncProducer**: 选择 SyncProducer，HandleWebhook 需要确认消息发送成功后才返回 202
 2. **序列化格式**: JSON，便于未来其他语言消费者解析
 3. **幂等性**: IncrementalSync 的 Upsert 基于 MERGE，天然幂等，Kafka 重复投递不会导致数据重复
-4. **向后兼容**: `kafka.enabled: false` 时行为与 V1 完全一致
+4. **向后兼容**: `event_bus.mode: "channel"` 时行为与 V1 完全一致
+5. **两层分离**: EventBus 层使用 `cfg.EventBus.Mode` 控制，数据源层使用 `cfg.Kafka.Enabled` 控制，两者独立配置
 
 ---
 

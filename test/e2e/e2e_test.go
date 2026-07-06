@@ -14,6 +14,7 @@ import (
 	"gitlab.com/pml/network-digital-twin/internal/connector"
 	"gitlab.com/pml/network-digital-twin/internal/connector/controller"
 	"gitlab.com/pml/network-digital-twin/internal/connector/mock"
+	"gitlab.com/pml/network-digital-twin/internal/events"
 	"gitlab.com/pml/network-digital-twin/internal/normalizer"
 	"gitlab.com/pml/network-digital-twin/internal/service"
 	"gitlab.com/pml/network-digital-twin/internal/snapshot"
@@ -646,7 +647,7 @@ func TestE2E_ConcurrentProtection(t *testing.T) {
 
 	// === Step 5: Restore 期间发送 5 个 Webhook 事件 ===
 	for i := 0; i < 5; i++ {
-		event := service.SyncEvent{
+		event := events.SyncEvent{
 			Action:     "update",
 			EntityType: "Device",
 			Data: []map[string]any{
@@ -659,7 +660,7 @@ func TestE2E_ConcurrentProtection(t *testing.T) {
 				},
 			},
 		}
-		if err := syncSvc.HandleWebhook(event); err != nil {
+		if err := syncSvc.HandleWebhook(ctx, event); err != nil {
 			t.Logf("HandleWebhook[%d] error (may be channel full): %v", i, err)
 		}
 	}
@@ -782,7 +783,8 @@ func TestE2E_FullSyncWithRealConnectors(t *testing.T) {
 	// 3. 创建 SyncService 并执行 FullSync
 	norm := normalizer.NewNormalizer(reg)
 	asm := assembler.NewGraphAssembler(reg)
-	syncSvc := service.NewSyncService(connReg, norm, asm, client, lock, 100)
+	pub, _ := events.NewChannelEventBus(100)
+	syncSvc := service.NewSyncService(connReg, norm, asm, client, lock, pub, nil, 100)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()

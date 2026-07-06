@@ -1,4 +1,4 @@
-# V2-04: Kafka 集成测试 + 配置扩展 + Fallback
+# V2-04: Kafka 集成测试 + 配置扩展 + EventBus Fallback
 
 **工时**: 1.5 天
 **前置**: V2-03
@@ -11,14 +11,25 @@
 
 V2-01~V2-03 完成了 Kafka 接口抽象、Producer、Consumer 实现。本任务完成：
 1. testcontainers 集成测试（真实 Kafka 容器）
-2. Fallback 机制（Kafka 不可用时降级到内存 Channel）
+2. **EventBus Fallback 机制**（仅作用于 EventBus 层，不影响数据源层）
 3. docker-compose 更新
+
+**两层架构**（详见 [事件总线两层架构设计](../../docs/事件总线两层架构设计.md)）：
+
+Fallback 机制专门针对**事件总线层**设计：
+- 当 `cfg.EventBus.Mode = "kafka"` 且 Kafka 不可用时，仅 EventBus 层从 Kafka 降级到 Channel
+- **数据源层不受影响**：Webhook 和 Kafka DataSource 继续正常工作
+- 触发条件：EventBus Kafka Publisher 发送失败
 
 ---
 
 ## 实现步骤
 
-### Step 1: Fallback 机制
+### Step 1: EventBus Fallback 机制
+
+> **作用范围**: Fallback 仅作用于 EventBus 层。当 EventBus Kafka 不可用时，
+> 数据源层（Webhook、Kafka DataSource）继续通过 publisher.Publish() 发送事件，
+> 事件经由降级后的 Channel EventBus 流转。
 
 新建 `internal/events/fallback.go`：
 
@@ -33,7 +44,8 @@ import (
 )
 
 // fallbackPublisher 带 Fallback 的 EventPublisher。
-// Kafka 不可用时自动降级到内存 Channel。
+// 仅作用于事件总线层：当 EventBus Kafka 不可用时自动降级到内存 Channel。
+// 不影响数据源层：Webhook 和 Kafka DataSource 继续通过 publisher.Publish() 发送事件。
 type fallbackPublisher struct {
     primary  EventPublisher  // Kafka
     fallback EventPublisher  // Channel
@@ -41,8 +53,10 @@ type fallbackPublisher struct {
     retryInterval time.Duration
 }
 
-// NewFallbackPublisher 创建带 Fallback 的 Publisher。
+// NewFallbackPublisher 创建带 Fallback 的 Publisher（仅 EventBus 层使用）。
 // 启动时检测 primary 连通性，不可用时自动切换到 fallback。
+// 数据源层不受影响：数据源通过 publisher.Publish() 发送事件，
+// 无论底层是 Kafka 还是 Channel fallback，数据源层透明。
 func NewFallbackPublisher(primary, fallback EventPublisher, retryInterval time.Duration) EventPublisher {
     return &fallbackPublisher{
         primary:       primary,
@@ -218,30 +232,28 @@ func TestKafkaEndToEnd(t *testing.T) {
 
   app:
     environment:
+      # 数据源层 (DataSource Layer)
       KAFKA_ENABLED: "true"
       KAFKA_BROKERS: "kafka:9092"
       KAFKA_TOPIC: "sync-events"
       KAFKA_GROUP_ID: "network-twin"
+      # 事件总线层 (EventBus Layer)
+      EVENT_BUS_MODE: "kafka"  # 或 "channel"，Fallback 仅在此层生效
 ```
 
 ### Step 5: 配置环境变量覆盖
 
-`internal/config/config.go` 新增：
+`internal/config/config.go` 已实现两层分离的环境变量覆盖：
 
 ```go
 func applyEnvOverrides(cfg *Config) {
-    // ... 现有覆盖
+    // 数据源层 (DataSource Layer)
     if v := envStr("KAFKA_ENABLED"); v == "true" {
         cfg.Kafka.Enabled = true
     }
-    if v := envStr("KAFKA_BROKERS"); v != "" {
-        cfg.Kafka.Brokers = strings.Split(v, ",")
-    }
-    if v := envStr("KAFKA_TOPIC"); v != "" {
-        cfg.Kafka.Topic = v
-    }
-    if v := envStr("KAFKA_GROUP_ID"); v != "" {
-        cfg.Kafka.GroupID = v
+    // 事件总线层 (EventBus Layer)
+    if v := envStr("EVENT_BUS_MODE"); v != "" {
+        cfg.EventBus.Mode = v
     }
 }
 ```
@@ -266,6 +278,7 @@ func applyEnvOverrides(cfg *Config) {
 - [ ] Fallback Publisher 单元测试全部通过
 - [ ] `go test -tags=integration ./internal/events/...` 集成测试通过
 - [ ] docker-compose 启动包含 Kafka 服务
-- [ ] Kafka 不可用时自动降级到 Channel，slog 输出 warn 日志
+- [ ] EventBus Kafka 不可用时仅 EventBus 层自动降级到 Channel，数据源层不受影响，slog 输出 warn 日志
 - [ ] 进程重启后 Kafka 中的消息仍可被消费
+- [ ] `cfg.Kafka.Enabled` 仅控制数据源层，不影响 EventBus Fallback
 - [ ] `go build ./...` 无错误

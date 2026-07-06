@@ -10,6 +10,7 @@ import (
 
 	"gitlab.com/pml/network-digital-twin/internal/assembler"
 	"gitlab.com/pml/network-digital-twin/internal/connector"
+	"gitlab.com/pml/network-digital-twin/internal/events"
 	"gitlab.com/pml/network-digital-twin/internal/graph"
 	"gitlab.com/pml/network-digital-twin/internal/normalizer"
 	"gitlab.com/pml/network-digital-twin/internal/snapshot"
@@ -47,18 +48,21 @@ type SyncService struct {
 	assembler  *assembler.GraphAssembler
 	graph      graph.GraphDB
 	lock       *snapshot.GraphLock
-	eventChan  chan SyncEvent
+	publisher  events.EventPublisher // 事件写入端（Channel 或 Kafka 实现）
+	consumer   events.EventConsumer  // 事件消费端（与 publisher 共享底层通道）
 }
 
 // NewSyncService 创建 SyncService 实例。
-// bufferSize 控制 Webhook 事件缓冲 channel 容量。
+// publisher: 事件写入端（Channel 或 Kafka 实现）。
+// consumer: 事件消费端（与 publisher 共享底层通道，StartConsumer 通过此接口消费事件）。
 func NewSyncService(
 	registry *connector.ConnectorRegistry,
 	norm *normalizer.Normalizer,
 	asm *assembler.GraphAssembler,
 	gdb graph.GraphDB,
 	lock *snapshot.GraphLock,
-	bufferSize int,
+	publisher events.EventPublisher,
+	consumer events.EventConsumer,
 ) *SyncService {
 	return &SyncService{
 		registry:   registry,
@@ -66,7 +70,8 @@ func NewSyncService(
 		assembler:  asm,
 		graph:      gdb,
 		lock:       lock,
-		eventChan:  make(chan SyncEvent, bufferSize),
+		publisher:  publisher,
+		consumer:   consumer,
 	}
 }
 
@@ -205,44 +210,61 @@ func (s *SyncService) IncrementalSync(ctx context.Context, event SyncEvent) (*Sy
 	}
 }
 
-// StartConsumer 启动消费者协程，串行消费 eventChan 中的事件。
+// StartConsumer 启动消费者协程，通过 EventConsumer 接口串行消费事件。
 // 每个事件处理前获取 GraphLock 写锁，处理后释放，保证与 FullSync/Restore 互斥。
 // context 取消后消费者停止，不再处理新事件。
 func (s *SyncService) StartConsumer(ctx context.Context) {
 	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				slog.Info("consumer stopped", "reason", ctx.Err())
-				return
-			case event := <-s.eventChan:
-				s.lock.Lock()
-				result, err := s.IncrementalSync(ctx, event)
-				s.lock.Unlock()
+		err := s.consumer.Consume(ctx, func(ctx context.Context, event events.SyncEvent) error {
+			s.lock.Lock()
+			defer s.lock.Unlock()
 
-				if err != nil {
-					slog.Error("incremental sync failed",
-						"action", event.Action, "error", err)
-				} else {
-					slog.Info("incremental sync completed",
-						"action", event.Action,
-						"nodes", result.NodesCreated,
-						"duration_ms", result.Duration.Milliseconds(),
-					)
-				}
+			svcEvent := s.toServiceEvent(event)
+			result, err := s.IncrementalSync(ctx, svcEvent)
+			if err != nil {
+				slog.Error("incremental sync failed",
+					"action", event.Action, "error", err)
+				return err
 			}
+			slog.Info("incremental sync completed",
+				"action", event.Action,
+				"nodes", result.NodesCreated,
+				"duration_ms", result.Duration.Milliseconds(),
+			)
+			return nil
+		})
+		if err != nil && !errors.Is(err, context.Canceled) {
+			slog.Error("consumer stopped with error", "error", err)
 		}
+		slog.Info("consumer stopped")
 	}()
 }
 
-// HandleWebhook Webhook Handler，非阻塞写入 eventChan，立即返回。
+// toServiceEvent 将 events.SyncEvent 转换为 service.SyncEvent。
+func (s *SyncService) toServiceEvent(e events.SyncEvent) SyncEvent {
+	svc := SyncEvent{
+		Action:     e.Action,
+		EntityType: e.EntityType,
+		Connector:  e.Connector,
+		Data:       e.Data,
+		URIs:       e.URIs,
+	}
+	for _, r := range e.Relations {
+		svc.Relations = append(svc.Relations, assembler.Relation{
+			Type: r.Type, From: r.From, To: r.To, Props: r.Props,
+		})
+	}
+	return svc
+}
+
+// HandleWebhook Webhook Handler，委托 EventPublisher 发布事件到共享通道。
+// publisher 与 consumer 共享底层通道（Channel 的 chan 或 Kafka 的 topic），
+// 事件经共享通道由 StartConsumer 消费后调用 IncrementalSync 处理。
 // 入队成功返回 nil（外部应返回 202 Accepted）。
 // channel 满时返回 error（外部应返回 503 Service Unavailable）。
-func (s *SyncService) HandleWebhook(event SyncEvent) error {
-	select {
-	case s.eventChan <- event:
-		return nil
-	default:
-		return errors.New("event queue full")
+func (s *SyncService) HandleWebhook(ctx context.Context, event events.SyncEvent) error {
+	if err := s.publisher.Publish(ctx, event); err != nil {
+		return fmt.Errorf("publish event: %w", err)
 	}
+	return nil
 }

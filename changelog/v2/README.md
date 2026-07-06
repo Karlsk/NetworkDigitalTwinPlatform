@@ -1,7 +1,7 @@
 # V2 研发计划 — 基础设施全面升级
 
 > 基于 V1 全部 22 项任务 + V1.2 全部 4 项任务完成，V2 聚焦 **基础设施升级**：
-> 1. Kafka 事件流（替代内存 Channel 缓冲）
+> 1. Kafka 事件流（数据源层 + 事件总线层分离架构）
 > 2. PostgreSQL 元数据存储（替代内存/YAML 元数据）
 > 3. Gin HTTP REST API（扩展 MCP 之外的访问通道）
 > 4. Prometheus + OpenTelemetry 可观测性
@@ -9,7 +9,7 @@
 
 **总任务数**: 18 项 (V2-01 ~ V2-18)
 **预估工时**: 22 人天（含缓冲 26 天）
-**架构设计**: 详见 [V1架构设计.md](../../docs/V1架构设计.md) 第 9 节技术债务清单 + [V1扩展方向.md](../../docs/V1扩展方向.md) 第 4-9 章
+**架构设计**: 详见 [事件总线两层架构设计](../../docs/事件总线两层架构设计.md) + [V1架构设计](../../docs/V1架构设计.md) + [V1扩展方向](../../docs/V1扩展方向.md)
 
 ---
 
@@ -49,7 +49,12 @@
 
 ## Phase 1: Kafka 事件流 (V2-01 ~ V2-04)
 
-> 目标：内存 Channel 替换为 Kafka Consumer Group，获得消息持久化 + 重试 + 多消费者并行
+> 目标：采用**数据源层 + 事件总线层**分离架构，内存 Channel 替换为 Kafka，获得消息持久化 + 重试 + 多消费者并行。
+>
+> **两层架构**（详见 [事件总线两层架构设计](../../docs/事件总线两层架构设计.md)）：
+> - **数据源层（DataSource Layer）**: 从外部系统接收事件（Webhook + Kafka DataSource），`cfg.Kafka.Enabled` 控制 Kafka 数据源开关
+> - **事件总线层（EventBus Layer）**: 内部事件管道（Channel/Kafka），`cfg.EventBus.Mode` 控制实现模式
+> - **Fallback 机制**: 仅作用于 EventBus 层，Kafka 不可用时自动降级到 Channel
 
 | 任务ID | 任务名称 | 工时 | 前置 | 交付物 |
 |--------|---------|------|------|--------|
@@ -214,7 +219,7 @@ Week 1        Week 2        Week 3        Week 4        Week 5
 | 4 | Race 检测 | `go test -race ./...` | 无 data race |
 | 5 | 覆盖率 | `go test -cover ./...` | >= 70% |
 | 6 | Kafka 消息持久化 | 杀进程重启 | 消息不丢失，Consumer 继续消费 |
-| 7 | Kafka Fallback | Kafka 不可用 | 自动降级到内存 Channel |
+| 7 | EventBus Fallback | EventBus Kafka 不可用 | 仅 EventBus 层自动降级到内存 Channel，数据源层不受影响 |
 | 8 | PostgreSQL 元数据 | CRUD 测试 | 快照/同步/连接器/审计数据正确持久化 |
 | 9 | 审计日志持久化 | 进程重启 | AuditLog 重启后历史记录可查 |
 | 10 | HTTP API 可用性 | curl/httptest | 8 个端点返回正确状态码和数据 |
@@ -244,7 +249,7 @@ Week 1        Week 2        Week 3        Week 4        Week 5
 
 | 风险 | 概率 | 影响 | 应对措施 |
 |------|------|------|---------|
-| Kafka 集群不可用导致服务无法启动 | 高 | 高 | V2-04 实现 Channel Fallback：Kafka 不可用时自动降级到内存 Channel |
+| Kafka EventBus 不可用导致服务启动降级 | 高 | 中 | V2-04 实现 EventBus Fallback：EventBus Kafka 不可用时仅 EventBus 层降级到 Channel，数据源层不受影响 |
 | PostgreSQL 连接失败影响核心功能 | 中 | 高 | Repository 层抽象接口，支持 InMemory 实现作为 Fallback |
 | Gin 与现有 MCP Server 端口冲突 | 低 | 中 | Gin 监听不同端口（如 8081），或通过统一路由复用同一端口 |
 | Kafka Consumer Group Rebalance 导致消息延迟 | 中 | 低 | 合理配置 Session.Timeout / Heartbeat.Interval，消费幂等设计 |

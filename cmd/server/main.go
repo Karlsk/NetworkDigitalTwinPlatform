@@ -14,6 +14,7 @@ import (
 	"gitlab.com/pml/network-digital-twin/internal/connector/controller"
 	"gitlab.com/pml/network-digital-twin/internal/connector/mock"
 	"gitlab.com/pml/network-digital-twin/internal/connector/netbox"
+	"gitlab.com/pml/network-digital-twin/internal/events"
 	"gitlab.com/pml/network-digital-twin/internal/graph"
 	intmcp "gitlab.com/pml/network-digital-twin/internal/mcp"
 	"gitlab.com/pml/network-digital-twin/internal/normalizer"
@@ -75,33 +76,83 @@ func main() {
 		os.Exit(1)
 	}
 
-	// 6. 初始化 SyncService
+	// 6. 初始化事件总线层（EventBus Layer）
+	// EventBus 是数据源和图数据库写入之间的中间管道层。
+	// cfg.EventBus.Mode 决定使用哪种实现：
+	//   - "channel": 内存 Channel（默认，V1 兼容）
+	//   - "kafka":   Kafka Topic（持久化）
+	// Fallback 机制仅作用于 EventBus 层：Kafka 不可用时自动降级到 Channel。
+	var publisher events.EventPublisher
+	var consumer events.EventConsumer
+
+	switch cfg.EventBus.Mode {
+	case "kafka":
+		saramaCfg, err := events.NewSaramaConfig(cfg.EventBus.Kafka.SASLUser, cfg.EventBus.Kafka.SASLPass)
+		if err != nil {
+			slog.Error("create sarama config", "error", err)
+			os.Exit(1)
+		}
+		publisher, err = events.NewKafkaPublisher(
+			cfg.EventBus.Kafka.Brokers, cfg.EventBus.Kafka.Topic, saramaCfg,
+		)
+		if err != nil {
+			slog.Error("create kafka publisher", "error", err)
+			os.Exit(1)
+		}
+		// EventBus Kafka Consumer 在 V2-03 实现，当前使用 nopConsumer 占位
+		consumer = nopConsumer{}
+		slog.Info("event bus: Kafka mode",
+			"brokers", cfg.EventBus.Kafka.Brokers,
+			"topic", cfg.EventBus.Kafka.Topic,
+		)
+	default: // "channel"
+		pub, con := events.NewChannelEventBus(cfg.Channel.BufferSize)
+		publisher = pub
+		consumer = con
+		slog.Info("event bus: Channel mode", "buffer_size", cfg.Channel.BufferSize)
+	}
+	defer publisher.Close()
+	defer consumer.Close()
+
+	// 6.1 初始化数据源层（DataSource Layer）
+	// 数据源层负责从外部系统接收事件，通过 publisher.Publish(event) 写入 EventBus。
+	// Webhook 数据源始终可用（通过 HandleWebhook 接收 HTTP 回调）。
+	// Kafka 数据源可选启用（cfg.Kafka.Enabled），从外部 Kafka Topic 消费事件。
+	if cfg.Kafka.Enabled {
+		slog.Info("data source: Kafka enabled",
+			"brokers", cfg.Kafka.Brokers,
+			"topic", cfg.Kafka.Topic,
+		)
+		// TODO V2-03: 启动 Kafka DataSource Consumer
+		// dataSourceConsumer 消费外部 Kafka Topic → publisher.Publish(event)
+	}
+
+	// 7. 初始化 SyncService
 	syncSvc := service.NewSyncService(
-		connRegistry, norm, asm, gdb, lock,
-		cfg.Channel.BufferSize,
+		connRegistry, norm, asm, gdb, lock, publisher, consumer,
 	)
 
-	// 7. 初始化 SnapshotManager
+	// 8. 初始化 SnapshotManager
 	snapMgr := snapshot.NewSnapshotManager(
 		gdb, lock, cfg.Snapshot.Dir, cfg.Snapshot.MaxActive,
 	)
 	snapMgr.SetRetentionDays(cfg.Snapshot.RetentionDays) // V1-20: TTL 保留策略
 
-	// 8. 初始化 AnalysisService 和 SnapshotService
+	// 9. 初始化 AnalysisService 和 SnapshotService
 	analysisSvc := service.NewAnalysisService(gdb, lock)
 	snapshotSvc := service.NewSnapshotService(snapMgr)
 
-	// 9. 初始化 DeviceService（只读，不需要 GraphLock）
+	// 10. 初始化 DeviceService（只读，不需要 GraphLock）
 	deviceSvc := service.NewDeviceService(connRegistry)
 
-	// 10. 构建 MCP Server 并注册工具
+	// 11. 构建 MCP Server 并注册工具
 	mcpServer := intmcp.NewNetworkTwinServer(analysisSvc, snapshotSvc, syncSvc, deviceSvc)
 
-	// 11. Graceful shutdown
+	// 12. Graceful shutdown
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	// 12. 启动 Streamable HTTP MCP Server
+	// 13. 启动 Streamable HTTP MCP Server
 	addr := fmt.Sprintf(":%d", cfg.Server.Port)
 	if err := intmcp.RunHTTP(ctx, mcpServer, addr); err != nil {
 		slog.Error("MCP server error", "error", err)
@@ -123,3 +174,12 @@ func collectAllLabels(reg schema.SchemaRegistry) []string {
 	}
 	return labels
 }
+
+// nopConsumer 空操作 EventConsumer，EventBus Kafka 模式下 V2-03 实现前占位。
+type nopConsumer struct{}
+
+func (nopConsumer) Consume(ctx context.Context, _ func(ctx context.Context, event events.SyncEvent) error) error {
+	<-ctx.Done()
+	return ctx.Err()
+}
+func (nopConsumer) Close() error { return nil }

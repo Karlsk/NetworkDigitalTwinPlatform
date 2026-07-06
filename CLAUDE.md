@@ -192,16 +192,16 @@ type GraphLock struct {
 - 锁被持有时，新的写入请求**阻塞等待**（或返回 503）
 - 只读查询始终使用读锁，不阻塞其他读操作
 
-### Channel 缓冲防丢
+### 事件总线防丢
 
 ```
-Webhook → eventChan (缓冲 channel) → 单协程消费者 → GraphLock → IncrementalSync
+DataSource (Webhook/Kafka) → publisher.Publish(event) → [EventBus 共享通道] → consumer.Consume(handler) → GraphLock → IncrementalSync
 ```
 
-- Webhook Handler 将事件写入 `eventChan` 后**立即返回 202 Accepted**（毫秒级）
-- 单协程串行消费，保证事件顺序，避免并发写入冲突
-- Channel 满时返回 `503 Service Unavailable`
-- **V1 升级路径**: Channel 替换为 Kafka consumer
+- DataSource 层通过 `publisher.Publish(event)` 将事件写入 EventBus 后**立即返回 202 Accepted**（毫秒级）
+- EventBus 层单协程串行消费，保证事件顺序，避免并发写入冲突
+- EventBus Channel 满时返回 `503 Service Unavailable`
+- **V2 架构**: EventBus 支持 Channel（内存）和 Kafka（持久化）两种模式，`cfg.EventBus.Mode` 控制
 
 ### 超时规范
 
@@ -484,14 +484,16 @@ var globalTimeout = 30 * time.Second
 
 **15. 用 channel + goroutine 做异步处理，不用回调**
 ```go
-// ✅ 本项目标准模式: Channel 缓冲 + 单协程消费
-eventChan := make(chan SyncEvent, 100)
+// ✅ 本项目标准模式: EventPublisher/Consumer 共享通道
+// V2: EventBus 层（Channel 或 Kafka 模式），publisher/consumer 共享底层通道
+publisher, consumer := events.NewChannelEventBus(100) // 或 NewKafkaPublisher/NewKafkaConsumer
 go func() {
-    for event := range eventChan {
+    consumer.Consume(ctx, func(ctx context.Context, event events.SyncEvent) error {
         s.lock.Lock()
+        defer s.lock.Unlock()
         s.processEvent(ctx, event)
-        s.lock.Unlock()
-    }
+        return nil
+    })
 }()
 ```
 
@@ -518,13 +520,14 @@ result, err := s.doSync(ctx)
 s.lock.Unlock()  // 如果 doSync panic，锁不会释放
 ```
 
-**18. 关闭 channel 前确保所有发送方已停止**
+**18. 关闭 EventBus 资源前确保所有发送方已停止**
 ```go
 // ✅ 使用 context 取消 + WaitGroup 等待所有发送方停止
 ctx, cancel := context.WithCancel(parentCtx)
 defer cancel()
 // ... 等待所有 goroutine 结束
-close(eventChan)
+defer publisher.Close()
+defer consumer.Close()
 ```
 
 ### 其他核心规范
