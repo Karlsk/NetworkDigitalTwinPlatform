@@ -103,10 +103,10 @@ func Load(path string) (*Config, error) {
 	v.SetDefault("schema.ontology_dir", "ontology")
 	v.SetDefault("channel.buffer_size", 100)
 	v.SetDefault("kafka.enabled", false)
-	v.SetDefault("kafka.topic", "sync-events")
+	v.SetDefault("kafka.topic", "external-sync-events")
 	v.SetDefault("kafka.group_id", "network-twin")
 	v.SetDefault("event_bus.mode", "channel")
-	v.SetDefault("event_bus.kafka.topic", "sync-events")
+	v.SetDefault("event_bus.kafka.topic", "internal-sync-events")
 	v.SetDefault("event_bus.kafka.group_id", "network-twin")
 
 	if err := v.ReadInConfig(); err != nil {

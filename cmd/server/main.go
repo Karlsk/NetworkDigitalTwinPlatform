@@ -93,13 +93,20 @@ func main() {
 			slog.Error("create sarama config", "error", err)
 			os.Exit(1)
 		}
-		publisher, err = events.NewKafkaPublisher(
+
+		// Kafka Publisher（primary）
+		kafkaPub, err := events.NewKafkaPublisher(
 			cfg.EventBus.Kafka.Brokers, cfg.EventBus.Kafka.Topic, saramaCfg,
 		)
 		if err != nil {
 			slog.Error("create kafka publisher", "error", err)
 			os.Exit(1)
 		}
+
+		// Channel Publisher（fallback）：Kafka 不可用时自动降级
+		channelFallbackPub, _ := events.NewChannelEventBus(cfg.Channel.BufferSize)
+		publisher = events.NewFallbackPublisher(kafkaPub, channelFallbackPub, 30*time.Second)
+
 		// EventBus Consumer（V2-03）：与 Publisher 共享同一个 Topic
 		consumer, err = events.NewKafkaConsumer(
 			cfg.EventBus.Kafka.Brokers,
@@ -111,7 +118,7 @@ func main() {
 			slog.Error("create kafka consumer", "error", err)
 			os.Exit(1)
 		}
-		slog.Info("event bus: Kafka mode",
+		slog.Info("event bus: Kafka mode (with Channel fallback)",
 			"brokers", cfg.EventBus.Kafka.Brokers,
 			"topic", cfg.EventBus.Kafka.Topic,
 		)

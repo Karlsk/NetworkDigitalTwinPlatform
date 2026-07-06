@@ -168,8 +168,8 @@ func TestLoad_Defaults(t *testing.T) {
 	if cfg.Kafka.Enabled != false {
 		t.Errorf("Kafka.Enabled default = %v, want false", cfg.Kafka.Enabled)
 	}
-	if cfg.Kafka.Topic != "sync-events" {
-		t.Errorf("Kafka.Topic default = %q, want %q", cfg.Kafka.Topic, "sync-events")
+	if cfg.Kafka.Topic != "external-sync-events" {
+		t.Errorf("Kafka.Topic default = %q, want %q", cfg.Kafka.Topic, "external-sync-events")
 	}
 	if cfg.Kafka.GroupID != "network-twin" {
 		t.Errorf("Kafka.GroupID default = %q, want %q", cfg.Kafka.GroupID, "network-twin")
@@ -178,8 +178,8 @@ func TestLoad_Defaults(t *testing.T) {
 	if cfg.EventBus.Mode != "channel" {
 		t.Errorf("EventBus.Mode default = %q, want %q", cfg.EventBus.Mode, "channel")
 	}
-	if cfg.EventBus.Kafka.Topic != "sync-events" {
-		t.Errorf("EventBus.Kafka.Topic default = %q, want %q", cfg.EventBus.Kafka.Topic, "sync-events")
+	if cfg.EventBus.Kafka.Topic != "internal-sync-events" {
+		t.Errorf("EventBus.Kafka.Topic default = %q, want %q", cfg.EventBus.Kafka.Topic, "internal-sync-events")
 	}
 	if cfg.EventBus.Kafka.GroupID != "network-twin" {
 		t.Errorf("EventBus.Kafka.GroupID default = %q, want %q", cfg.EventBus.Kafka.GroupID, "network-twin")

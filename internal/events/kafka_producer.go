@@ -34,18 +34,26 @@ func (a *saramaProducerAdapter) Close() error {
 // kafkaPublisher 基于 Kafka 的 EventPublisher 实现。
 type kafkaPublisher struct {
 	producer syncProducer
+	client   sarama.Client // 共享 client，用于 Ping 连通性探测
 	topic    string
 }
 
 // NewKafkaPublisher 创建 Kafka Producer。
 // 使用 SyncProducer（同步发送），确保消息发送成功后才返回。
+// 内部创建共享 sarama.Client，同时用于 SyncProducer 和 Ping 探测。
 func NewKafkaPublisher(brokers []string, topic string, config *sarama.Config) (EventPublisher, error) {
-	producer, err := sarama.NewSyncProducer(brokers, config)
+	client, err := sarama.NewClient(brokers, config)
 	if err != nil {
+		return nil, fmt.Errorf("create kafka client: %w", err)
+	}
+	producer, err := sarama.NewSyncProducerFromClient(client)
+	if err != nil {
+		client.Close()
 		return nil, fmt.Errorf("create kafka producer: %w", err)
 	}
 	return &kafkaPublisher{
 		producer: &saramaProducerAdapter{producer: producer},
+		client:   client,
 		topic:    topic,
 	}, nil
 }
@@ -67,4 +75,16 @@ func (p *kafkaPublisher) Publish(_ context.Context, event SyncEvent) error {
 // Close 关闭 Kafka producer，释放资源。
 func (p *kafkaPublisher) Close() error {
 	return p.producer.Close()
+}
+
+// Ping 探测 Kafka 连通性（实现 pinger 接口）。
+// fallbackPublisher.tryRecover 通过此方法判断 primary 是否恢复。
+func (p *kafkaPublisher) Ping() error {
+	if p.client == nil {
+		return fmt.Errorf("kafka client not initialized")
+	}
+	if len(p.client.Brokers()) == 0 {
+		return fmt.Errorf("no kafka brokers connected")
+	}
+	return nil
 }

@@ -33,6 +33,7 @@ Thumbs.db
 # Environment
 .env
 .env.local
+!deploy/.env
 
 # Snapshots (generated data)
 snapshots/
@@ -41,3 +42,4 @@ snapshots/
 .claude
 # Build artifacts
 /pipeline-demo
+/kafka-test
