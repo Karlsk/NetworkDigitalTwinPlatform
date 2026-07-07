@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"gitlab.com/pml/network-digital-twin/internal/connector/mock"
 	"gitlab.com/pml/network-digital-twin/internal/events"
 	"gitlab.com/pml/network-digital-twin/internal/normalizer"
+	"gitlab.com/pml/network-digital-twin/internal/repository"
 	"gitlab.com/pml/network-digital-twin/internal/schema"
 	"gitlab.com/pml/network-digital-twin/internal/snapshot"
 )
@@ -1046,5 +1048,189 @@ func TestStartConsumer_StopsOnContextCancel(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 	if len(gdb.deleteByURIsCalls) != 0 {
 		t.Errorf("consumer should not process events after context cancel, but processed %d", len(gdb.deleteByURIsCalls))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// V2-07: SyncLogRepository 集成测试
+// ---------------------------------------------------------------------------
+
+// mockSyncLogRepo 用于测试的 SyncLogRepository mock。
+type mockSyncLogRepo struct {
+	mu      sync.Mutex
+	records []repository.SyncLogRecord
+	createErr error // 注入错误
+}
+
+var _ repository.SyncLogRepository = (*mockSyncLogRepo)(nil)
+
+func (m *mockSyncLogRepo) Create(_ context.Context, r repository.SyncLogRecord) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.createErr != nil {
+		return m.createErr
+	}
+	m.records = append(m.records, r)
+	return nil
+}
+
+func (m *mockSyncLogRepo) List(_ context.Context, _ int) ([]repository.SyncLogRecord, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.records, nil
+}
+
+func (m *mockSyncLogRepo) ListByType(_ context.Context, syncType string, _ int) ([]repository.SyncLogRecord, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var filtered []repository.SyncLogRecord
+	for _, r := range m.records {
+		if r.SyncType == syncType {
+			filtered = append(filtered, r)
+		}
+	}
+	return filtered, nil
+}
+
+func (m *mockSyncLogRepo) Count(_ context.Context) (int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return int64(len(m.records)), nil
+}
+
+// TestFullSync_WithSyncLogRepo 验证 FullSync 成功后 syncLogRepo 有记录。
+func TestFullSync_WithSyncLogRepo(t *testing.T) {
+	reg := loadTestOntology(t)
+
+	dataDir := filepath.Join("..", "..", "testdata", "mock_netbox")
+	if _, err := os.Stat(dataDir); os.IsNotExist(err) {
+		t.Skipf("testdata/mock_netbox not found at %s, skipping", dataDir)
+	}
+
+	conn := mock.NewMockConnector("mock-netbox", dataDir, []string{
+		"Device", "Interface", "ISIS", "Link", "Network_Slice",
+	})
+	registry := connector.NewConnectorRegistry()
+	registry.Register(conn)
+
+	norm := normalizer.NewNormalizer(reg)
+	asm := assembler.NewGraphAssembler(reg)
+	gdb := &mockGraphDB{}
+	lock := snapshot.NewGraphLock()
+
+	syncLog := &mockSyncLogRepo{}
+	svc := NewSyncService(registry, norm, asm, gdb, lock, nopEventBus{}, nopEventBus{},
+		WithSyncLogRepository(syncLog))
+
+	_, err := svc.FullSync(context.Background())
+	if err != nil {
+		t.Fatalf("FullSync() error = %v", err)
+	}
+
+	// 验证 syncLogRepo 有 1 条记录
+	syncLog.mu.Lock()
+	defer syncLog.mu.Unlock()
+	if len(syncLog.records) != 1 {
+		t.Fatalf("expected 1 sync log record, got %d", len(syncLog.records))
+	}
+
+	rec := syncLog.records[0]
+	if rec.SyncType != "full" {
+		t.Errorf("SyncType = %q, want %q", rec.SyncType, "full")
+	}
+	if rec.Status != "success" {
+		t.Errorf("Status = %q, want %q", rec.Status, "success")
+	}
+	if rec.NodesCreated != 21 {
+		t.Errorf("NodesCreated = %d, want 21", rec.NodesCreated)
+	}
+	if rec.DurationMs < 0 {
+		t.Errorf("DurationMs = %d, want >= 0", rec.DurationMs)
+	}
+}
+
+// TestFullSync_SyncLogRepoError 验证 syncLogRepo.Create 失败不阻断 FullSync。
+func TestFullSync_SyncLogRepoError(t *testing.T) {
+	reg := loadTestOntology(t)
+
+	registry := connector.NewConnectorRegistry()
+	// 注册一个有数据的 connector
+	conn := &mockConnector{
+		name:        "test-conn",
+		entityTypes: []string{"Device"},
+		resources: map[string][]connector.Resource{
+			"Device": {
+				{Kind: "Device", ID: "1", Properties: map[string]any{
+					"serial_number": "SN001", "hostname": "router-01", "vendor": "Huawei",
+					"model": "NE40E", "status": "Up",
+				}},
+			},
+		},
+	}
+	registry.Register(conn)
+
+	norm := normalizer.NewNormalizer(reg)
+	asm := assembler.NewGraphAssembler(reg)
+	gdb := &mockGraphDB{}
+	lock := snapshot.NewGraphLock()
+
+	// 注入错误的 syncLogRepo
+	syncLog := &mockSyncLogRepo{createErr: errors.New("pg connection lost")}
+	svc := NewSyncService(registry, norm, asm, gdb, lock, nopEventBus{}, nopEventBus{},
+		WithSyncLogRepository(syncLog))
+
+	result, err := svc.FullSync(context.Background())
+
+	// FullSync 应成功（syncLogRepo 失败仅 slog.Warn）
+	if err != nil {
+		t.Fatalf("FullSync() error = %v, want nil (sync log error should not block)", err)
+	}
+	if result.NodesCreated != 1 {
+		t.Errorf("NodesCreated = %d, want 1", result.NodesCreated)
+	}
+}
+
+// TestIncrementalSync_WithSyncLogRepo 验证 IncrementalSync 成功后有同步日志。
+func TestIncrementalSync_WithSyncLogRepo(t *testing.T) {
+	reg := loadTestOntology(t)
+
+	registry := connector.NewConnectorRegistry()
+	norm := normalizer.NewNormalizer(reg)
+	asm := assembler.NewGraphAssembler(reg)
+	gdb := &mockGraphDB{}
+	lock := snapshot.NewGraphLock()
+
+	syncLog := &mockSyncLogRepo{}
+	svc := NewSyncService(registry, norm, asm, gdb, lock, nopEventBus{}, nopEventBus{},
+		WithSyncLogRepository(syncLog))
+
+	event := SyncEvent{
+		Action:     "update",
+		EntityType: "Device",
+		Data: []map[string]any{
+			{"serial_number": "SN001", "hostname": "router-01", "vendor": "Huawei", "model": "NE40E", "status": "Up"},
+		},
+	}
+
+	_, err := svc.IncrementalSync(context.Background(), event)
+	if err != nil {
+		t.Fatalf("IncrementalSync() error = %v", err)
+	}
+
+	syncLog.mu.Lock()
+	defer syncLog.mu.Unlock()
+	if len(syncLog.records) != 1 {
+		t.Fatalf("expected 1 sync log record, got %d", len(syncLog.records))
+	}
+
+	rec := syncLog.records[0]
+	if rec.SyncType != "incremental" {
+		t.Errorf("SyncType = %q, want %q", rec.SyncType, "incremental")
+	}
+	if rec.Status != "success" {
+		t.Errorf("Status = %q, want %q", rec.Status, "success")
+	}
+	if rec.NodesCreated != 1 {
+		t.Errorf("NodesCreated = %d, want 1", rec.NodesCreated)
 	}
 }

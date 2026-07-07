@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"gitlab.com/pml/network-digital-twin/internal/assembler"
 	"gitlab.com/pml/network-digital-twin/internal/config"
 	"gitlab.com/pml/network-digital-twin/internal/connector"
@@ -165,14 +166,9 @@ func main() {
 		}()
 	}
 
-	// 7. 初始化 SyncService
-	syncSvc := service.NewSyncService(
-		connRegistry, norm, asm, gdb, lock, publisher, consumer,
-	)
-
-	// 8. 初始化 SnapshotManager
-	// V2-06: postgres.enabled 时初始化 PG SnapshotRepository
-	var snapOpts []snapshot.Option
+	// 7. 初始化 PostgreSQL 连接池（V2-05）
+	// pool 共享给 SnapshotRepository (V2-06) 和 SyncLogRepository (V2-07)
+	var pgPool *pgxpool.Pool
 	if cfg.Postgres.Enabled {
 		pool, pgErr := repository.NewPGPool(ctx, repository.PGConfig{
 			URL:      cfg.Postgres.URL,
@@ -182,15 +178,33 @@ func main() {
 		if pgErr != nil {
 			slog.Warn("postgresql disabled: connection failed, falling back to memory", "error", pgErr)
 		} else {
+			pgPool = pool
 			defer pool.Close()
 			if migErr := repository.RunMigrations(pool); migErr != nil {
 				slog.Warn("database migrations failed", "error", migErr)
 			}
-			snapOpts = append(snapOpts, snapshot.WithSnapshotRepository(
-				repository.NewPGSnapshotRepository(pool),
-			))
-			slog.Info("postgresql snapshot repository enabled")
+			slog.Info("postgresql connected")
 		}
+	}
+
+	// 7.1 初始化 SyncService
+	var syncOpts []service.SyncOption
+	if pgPool != nil {
+		syncOpts = append(syncOpts, service.WithSyncLogRepository(
+			repository.NewPGSyncLogRepository(pgPool),
+		))
+	}
+	syncSvc := service.NewSyncService(
+		connRegistry, norm, asm, gdb, lock, publisher, consumer, syncOpts...,
+	)
+
+	// 8. 初始化 SnapshotManager
+	var snapOpts []snapshot.Option
+	if pgPool != nil {
+		snapOpts = append(snapOpts, snapshot.WithSnapshotRepository(
+			repository.NewPGSnapshotRepository(pgPool),
+		))
+		slog.Info("postgresql snapshot repository enabled")
 	}
 	snapMgr := snapshot.NewSnapshotManager(
 		gdb, lock, cfg.Snapshot.Dir, cfg.Snapshot.MaxActive, snapOpts...,

@@ -784,7 +784,7 @@ func TestE2E_FullSyncWithRealConnectors(t *testing.T) {
 	norm := normalizer.NewNormalizer(reg)
 	asm := assembler.NewGraphAssembler(reg)
 	pub, _ := events.NewChannelEventBus(100)
-	syncSvc := service.NewSyncService(connReg, norm, asm, client, lock, pub, nil, 100)
+	syncSvc := service.NewSyncService(connReg, norm, asm, client, lock, pub, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()

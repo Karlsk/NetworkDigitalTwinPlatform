@@ -13,6 +13,7 @@ import (
 	"gitlab.com/pml/network-digital-twin/internal/events"
 	"gitlab.com/pml/network-digital-twin/internal/graph"
 	"gitlab.com/pml/network-digital-twin/internal/normalizer"
+	"gitlab.com/pml/network-digital-twin/internal/repository"
 	"gitlab.com/pml/network-digital-twin/internal/snapshot"
 )
 
@@ -43,18 +44,30 @@ type SyncEvent struct {
 // 编排 Connector → Normalizer → GraphAssembler → GraphDB 的完整数据流。
 // 通过 GraphLock 与 SnapshotManager 共享并发保护。
 type SyncService struct {
-	registry   *connector.ConnectorRegistry
-	normalizer *normalizer.Normalizer
-	assembler  *assembler.GraphAssembler
-	graph      graph.GraphDB
-	lock       *snapshot.GraphLock
-	publisher  events.EventPublisher // 事件写入端（Channel 或 Kafka 实现）
-	consumer   events.EventConsumer  // 事件消费端（与 publisher 共享底层通道）
+	registry    *connector.ConnectorRegistry
+	normalizer  *normalizer.Normalizer
+	assembler   *assembler.GraphAssembler
+	graph       graph.GraphDB
+	lock        *snapshot.GraphLock
+	publisher   events.EventPublisher            // 事件写入端（Channel 或 Kafka 实现）
+	consumer    events.EventConsumer             // 事件消费端（与 publisher 共享底层通道）
+	syncLogRepo repository.SyncLogRepository     // V2-07: 同步日志（可为 nil）
+}
+
+// SyncOption SyncService 选项函数。
+type SyncOption func(*SyncService)
+
+// WithSyncLogRepository 注入 SyncLogRepository，用于记录同步历史。
+func WithSyncLogRepository(repo repository.SyncLogRepository) SyncOption {
+	return func(s *SyncService) {
+		s.syncLogRepo = repo
+	}
 }
 
 // NewSyncService 创建 SyncService 实例。
 // publisher: 事件写入端（Channel 或 Kafka 实现）。
 // consumer: 事件消费端（与 publisher 共享底层通道，StartConsumer 通过此接口消费事件）。
+// opts: 可选依赖注入（如 WithSyncLogRepository）。
 func NewSyncService(
 	registry *connector.ConnectorRegistry,
 	norm *normalizer.Normalizer,
@@ -63,8 +76,9 @@ func NewSyncService(
 	lock *snapshot.GraphLock,
 	publisher events.EventPublisher,
 	consumer events.EventConsumer,
+	opts ...SyncOption,
 ) *SyncService {
-	return &SyncService{
+	s := &SyncService{
 		registry:   registry,
 		normalizer: norm,
 		assembler:  asm,
@@ -73,6 +87,10 @@ func NewSyncService(
 		publisher:  publisher,
 		consumer:   consumer,
 	}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
 // FullSync 全量同步：持有写锁 → ClearDB → 全量拉取 → Normalizer → Assembler → BulkCreate。
@@ -86,6 +104,7 @@ func (s *SyncService) FullSync(ctx context.Context) (*SyncResult, error) {
 
 	// 2. ClearDB
 	if err := s.graph.ClearDB(ctx, "default"); err != nil {
+		s.recordSyncLog(ctx, "full", "failed", nil, start, err)
 		return nil, fmt.Errorf("clear db: %w", err)
 	}
 
@@ -126,6 +145,7 @@ func (s *SyncService) FullSync(ctx context.Context) (*SyncResult, error) {
 
 	// 6. 批量写入 Neo4j
 	if err := s.graph.BulkCreate(ctx, "default", model.Nodes, model.Relations); err != nil {
+		s.recordSyncLog(ctx, "full", "failed", nil, start, err)
 		return nil, fmt.Errorf("bulk create: %w", err)
 	}
 
@@ -136,13 +156,18 @@ func (s *SyncService) FullSync(ctx context.Context) (*SyncResult, error) {
 		"duration_ms", time.Since(start).Milliseconds(),
 	)
 
-	return &SyncResult{
+	result := &SyncResult{
 		NodesCreated:       len(model.Nodes),
 		RelationsCreated:  len(model.Relations),
 		OrphanEdgesSkipped: len(warnings),
 		Warnings:           warnings,
 		Duration:           time.Since(start),
-	}, nil
+	}
+
+	// V2-07: 记录同步日志
+	s.recordSyncLog(ctx, "full", "success", result, start, nil)
+
+	return result, nil
 }
 
 // IncrementalSync 增量同步：根据 event.Action 分发处理。
@@ -185,25 +210,33 @@ func (s *SyncService) IncrementalSync(ctx context.Context, event SyncEvent) (*Sy
 			return nil, fmt.Errorf("upsert: %w", err)
 		}
 
-		return &SyncResult{
+		result := &SyncResult{
 			NodesCreated:       len(model.Nodes),
 			RelationsCreated:  len(model.Relations),
 			OrphanEdgesSkipped: len(warnings),
 			Warnings:           warnings,
 			Duration:           time.Since(start),
-		}, nil
+		}
+		s.recordSyncLog(ctx, "incremental", "success", result, start, nil)
+		return result, nil
 
 	case "delete":
 		if err := s.graph.DeleteByURIs(ctx, "default", event.URIs); err != nil {
+			s.recordSyncLog(ctx, "incremental", "failed", nil, start, err)
 			return nil, fmt.Errorf("delete by uris: %w", err)
 		}
-		return &SyncResult{Duration: time.Since(start)}, nil
+		result := &SyncResult{Duration: time.Since(start)}
+		s.recordSyncLog(ctx, "incremental", "success", result, start, nil)
+		return result, nil
 
 	case "delete_relation":
 		if err := s.graph.DeleteRelations(ctx, "default", event.Relations); err != nil {
+			s.recordSyncLog(ctx, "incremental", "failed", nil, start, err)
 			return nil, fmt.Errorf("delete relations: %w", err)
 		}
-		return &SyncResult{Duration: time.Since(start)}, nil
+		result := &SyncResult{Duration: time.Since(start)}
+		s.recordSyncLog(ctx, "incremental", "success", result, start, nil)
+		return result, nil
 
 	default:
 		return nil, fmt.Errorf("unknown action: %s", event.Action)
@@ -255,6 +288,46 @@ func (s *SyncService) toServiceEvent(e events.SyncEvent) SyncEvent {
 		})
 	}
 	return svc
+}
+
+// recordSyncLog 记录同步日志（V2-07）。syncLogRepo 为 nil 时静默跳过。
+// Create 失败时 slog.Warn 降级，不阻断主流程。
+func (s *SyncService) recordSyncLog(
+	ctx context.Context,
+	syncType, status string,
+	result *SyncResult,
+	start time.Time,
+	syncErr error,
+) {
+	if s.syncLogRepo == nil {
+		return
+	}
+
+	rec := repository.SyncLogRecord{
+		SyncType:  syncType,
+		Status:    status,
+		StartedAt: start,
+		CompletedAt: time.Now(),
+	}
+
+	if result != nil {
+		rec.NodesCreated = result.NodesCreated
+		rec.RelationsCreated = result.RelationsCreated
+		rec.OrphanEdges = result.OrphanEdgesSkipped
+		rec.DurationMs = result.Duration.Milliseconds()
+	}
+
+	if syncErr != nil {
+		rec.ErrorMessage = syncErr.Error()
+	}
+
+	if logErr := s.syncLogRepo.Create(ctx, rec); logErr != nil {
+		slog.Warn("failed to record sync log",
+			"sync_type", syncType,
+			"status", status,
+			"error", logErr,
+		)
+	}
 }
 
 // HandleWebhook Webhook Handler，委托 EventPublisher 发布事件到共享通道。
