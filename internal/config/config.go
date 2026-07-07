@@ -20,6 +20,7 @@ type Config struct {
 	Channel  ChannelConfig  `mapstructure:"channel"`
 	Kafka    KafkaConfig    `mapstructure:"kafka"`     // 数据源层（DataSource Layer）
 	EventBus EventBusConfig `mapstructure:"event_bus"` // 事件总线层（EventBus Layer）
+	Postgres PGConfig       `mapstructure:"postgres"`  // V2: PostgreSQL 元数据存储
 }
 
 // Neo4JConfig 是 Neo4j 连接配置
@@ -87,6 +88,15 @@ type EventBusKafkaConfig struct {
 	SASLPass string   `mapstructure:"sasl_pass"`  // 可选 SASL 认证
 }
 
+// PGConfig PostgreSQL 配置。
+// Enabled=false 时不初始化 PostgreSQL 连接，不影响现有功能。
+type PGConfig struct {
+	Enabled  bool   `mapstructure:"enabled"`   // false = 不启用 PostgreSQL
+	URL      string `mapstructure:"url"`       // postgres://user:pass@host:port/db?sslmode=disable
+	MaxConns int32  `mapstructure:"max_conns"` // 最大连接数，默认 10
+	MinConns int32  `mapstructure:"min_conns"` // 最小连接数，默认 2
+}
+
 // Load 从 YAML 文件加载配置，支持环境变量覆盖
 // path: 配置文件路径（如 configs/config.yaml）
 func Load(path string) (*Config, error) {
@@ -108,6 +118,9 @@ func Load(path string) (*Config, error) {
 	v.SetDefault("event_bus.mode", "channel")
 	v.SetDefault("event_bus.kafka.topic", "internal-sync-events")
 	v.SetDefault("event_bus.kafka.group_id", "network-twin")
+	v.SetDefault("postgres.enabled", false)
+	v.SetDefault("postgres.max_conns", 10)
+	v.SetDefault("postgres.min_conns", 2)
 
 	if err := v.ReadInConfig(); err != nil {
 		return nil, fmt.Errorf("read config %s: %w", path, err)
@@ -145,6 +158,13 @@ func applyEnvOverrides(cfg *Config) {
 	// 事件总线层（EventBus Layer）
 	if v := envStr("EVENT_BUS_MODE"); v != "" {
 		cfg.EventBus.Mode = v
+	}
+	// PostgreSQL 元数据存储
+	if v := envStr("POSTGRES_ENABLED"); v == "true" {
+		cfg.Postgres.Enabled = true
+	}
+	if v := envStr("POSTGRES_URL"); v != "" {
+		cfg.Postgres.URL = v
 	}
 }
 

@@ -44,6 +44,12 @@ event_bus:
     group_id: "eb-group"
     sasl_user: "eb-user"
     sasl_pass: "eb-pass"
+
+postgres:
+  enabled: true
+  url: "postgres://twin:twin@localhost:5432/twin?sslmode=disable"
+  max_conns: 20
+  min_conns: 5
 `
 
 // writeTempConfig 将内容写入临时目录并返回文件路径
@@ -132,6 +138,20 @@ func TestLoad_ValidConfig(t *testing.T) {
 	if cfg.EventBus.Kafka.GroupID != "eb-group" {
 		t.Errorf("EventBus.Kafka.GroupID = %q, want %q", cfg.EventBus.Kafka.GroupID, "eb-group")
 	}
+
+	// PostgreSQL
+	if !cfg.Postgres.Enabled {
+		t.Errorf("Postgres.Enabled = %v, want true", cfg.Postgres.Enabled)
+	}
+	if cfg.Postgres.URL != "postgres://twin:twin@localhost:5432/twin?sslmode=disable" {
+		t.Errorf("Postgres.URL = %q, want %q", cfg.Postgres.URL, "postgres://twin:twin@localhost:5432/twin?sslmode=disable")
+	}
+	if cfg.Postgres.MaxConns != 20 {
+		t.Errorf("Postgres.MaxConns = %d, want 20", cfg.Postgres.MaxConns)
+	}
+	if cfg.Postgres.MinConns != 5 {
+		t.Errorf("Postgres.MinConns = %d, want 5", cfg.Postgres.MinConns)
+	}
 }
 
 func TestLoad_Defaults(t *testing.T) {
@@ -184,6 +204,16 @@ func TestLoad_Defaults(t *testing.T) {
 	if cfg.EventBus.Kafka.GroupID != "network-twin" {
 		t.Errorf("EventBus.Kafka.GroupID default = %q, want %q", cfg.EventBus.Kafka.GroupID, "network-twin")
 	}
+	// PostgreSQL defaults
+	if cfg.Postgres.Enabled != false {
+		t.Errorf("Postgres.Enabled default = %v, want false", cfg.Postgres.Enabled)
+	}
+	if cfg.Postgres.MaxConns != 10 {
+		t.Errorf("Postgres.MaxConns default = %d, want 10", cfg.Postgres.MaxConns)
+	}
+	if cfg.Postgres.MinConns != 2 {
+		t.Errorf("Postgres.MinConns default = %d, want 2", cfg.Postgres.MinConns)
+	}
 }
 
 func TestLoad_EnvOverride(t *testing.T) {
@@ -203,6 +233,25 @@ func TestLoad_EnvOverride(t *testing.T) {
 	// 未覆盖的字段保持不变
 	if cfg.Neo4J.User != "testuser" {
 		t.Errorf("Neo4J.User should remain %q, got %q", "testuser", cfg.Neo4J.User)
+	}
+}
+
+func TestLoad_PostgresEnvOverride(t *testing.T) {
+	path := writeTempConfig(t, fullYAML)
+
+	t.Setenv("POSTGRES_URL", "postgres://override:pass@remote:5432/db?sslmode=require")
+	t.Setenv("POSTGRES_ENABLED", "true")
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+
+	if cfg.Postgres.URL != "postgres://override:pass@remote:5432/db?sslmode=require" {
+		t.Errorf("Postgres.URL after env override = %q, want %q", cfg.Postgres.URL, "postgres://override:pass@remote:5432/db?sslmode=require")
+	}
+	if !cfg.Postgres.Enabled {
+		t.Errorf("Postgres.Enabled after env override = %v, want true", cfg.Postgres.Enabled)
 	}
 }
 

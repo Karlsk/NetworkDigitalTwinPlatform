@@ -38,3 +38,12 @@ event_bus:
     brokers: ["172.17.1.224:9092"]
     topic: "internal-sync-events"     # 内部事件 Topic（EventBus 层）
     group_id: "network-twin"
+
+# ==================== PostgreSQL 元数据存储 ====================
+# V2: 结构化元数据持久化（快照记录、同步历史、连接器配置、审计日志、Schema版本）
+# enabled=false 时不初始化连接，不影响现有功能
+postgres:
+  enabled: false                        # V2 默认关闭
+  url: "postgres://twin:twin@localhost:5432/twin?sslmode=disable"
+  max_conns: 10
+  min_conns: 2
