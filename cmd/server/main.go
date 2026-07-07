@@ -19,6 +19,7 @@ import (
 	"gitlab.com/pml/network-digital-twin/internal/graph"
 	intmcp "gitlab.com/pml/network-digital-twin/internal/mcp"
 	"gitlab.com/pml/network-digital-twin/internal/normalizer"
+	"gitlab.com/pml/network-digital-twin/internal/repository"
 	"gitlab.com/pml/network-digital-twin/internal/schema"
 	"gitlab.com/pml/network-digital-twin/internal/service"
 	"gitlab.com/pml/network-digital-twin/internal/snapshot"
@@ -170,8 +171,29 @@ func main() {
 	)
 
 	// 8. 初始化 SnapshotManager
+	// V2-06: postgres.enabled 时初始化 PG SnapshotRepository
+	var snapOpts []snapshot.Option
+	if cfg.Postgres.Enabled {
+		pool, pgErr := repository.NewPGPool(ctx, repository.PGConfig{
+			URL:      cfg.Postgres.URL,
+			MaxConns: cfg.Postgres.MaxConns,
+			MinConns: cfg.Postgres.MinConns,
+		})
+		if pgErr != nil {
+			slog.Warn("postgresql disabled: connection failed, falling back to memory", "error", pgErr)
+		} else {
+			defer pool.Close()
+			if migErr := repository.RunMigrations(pool); migErr != nil {
+				slog.Warn("database migrations failed", "error", migErr)
+			}
+			snapOpts = append(snapOpts, snapshot.WithSnapshotRepository(
+				repository.NewPGSnapshotRepository(pool),
+			))
+			slog.Info("postgresql snapshot repository enabled")
+		}
+	}
 	snapMgr := snapshot.NewSnapshotManager(
-		gdb, lock, cfg.Snapshot.Dir, cfg.Snapshot.MaxActive,
+		gdb, lock, cfg.Snapshot.Dir, cfg.Snapshot.MaxActive, snapOpts...,
 	)
 	snapMgr.SetRetentionDays(cfg.Snapshot.RetentionDays) // V1-20: TTL 保留策略
 

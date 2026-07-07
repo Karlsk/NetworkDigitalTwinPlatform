@@ -3,6 +3,7 @@ package snapshot
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -14,6 +15,7 @@ import (
 
 	"gitlab.com/pml/network-digital-twin/internal/assembler"
 	"gitlab.com/pml/network-digital-twin/internal/graph"
+	"gitlab.com/pml/network-digital-twin/internal/repository"
 )
 
 // SnapshotMeta 快照元数据。
@@ -76,11 +78,23 @@ type SnapshotManager struct {
 	cacheReady bool                    // 新增: 缓存是否已预热
 	auditLog   *AuditLog               // V1-18: 审计日志
 	retentionDays int                  // V1-20: TTL 保留天数，0 = 不自动清理
+	repo       repository.SnapshotRepository // V2-06: 元数据持久化（nil 时走 metaCache）
+}
+
+// Option SnapshotManager 可选依赖注入（V2-06）。
+type Option func(*SnapshotManager)
+
+// WithSnapshotRepository 注入 SnapshotRepository，启用后元数据优先写入 PostgreSQL。
+func WithSnapshotRepository(repo repository.SnapshotRepository) Option {
+	return func(sm *SnapshotManager) {
+		sm.repo = repo
+	}
 }
 
 // NewSnapshotManager 创建快照管理器。
-func NewSnapshotManager(g graph.GraphDB, lock *GraphLock, snapDir string, maxActive int) *SnapshotManager {
-	return &SnapshotManager{
+// opts 可通过 WithSnapshotRepository 注入 PostgreSQL 元数据仓库（V2-06）。
+func NewSnapshotManager(g graph.GraphDB, lock *GraphLock, snapDir string, maxActive int, opts ...Option) *SnapshotManager {
+	sm := &SnapshotManager{
 		graph:      g,
 		lock:       lock,
 		snapDir:    snapDir,
@@ -89,6 +103,10 @@ func NewSnapshotManager(g graph.GraphDB, lock *GraphLock, snapDir string, maxAct
 		metaCache:  make(map[string]SnapshotMeta),
 		auditLog:   NewAuditLog(1000), // V1-18: 默认保留 1000 条审计记录
 	}
+	for _, opt := range opts {
+		opt(sm)
+	}
+	return sm
 }
 
 // AuditLog 返回审计日志实例，供外部（如 MCP/Service）查询审计记录。
@@ -227,6 +245,20 @@ func (sm *SnapshotManager) Create(ctx context.Context, name string) (meta Snapsh
 	sm.cacheReady = true
 	sm.cacheMu.Unlock()
 
+	// V2-06: 同步写入 Repository
+	if sm.repo != nil {
+		if repoErr := sm.repo.Create(ctx, &repository.SnapshotRecord{
+			Name:      meta.Name,
+			CreatedAt: meta.CreatedAt,
+			NodeCount: meta.NodeCount,
+			RelCount:  meta.RelCount,
+			FilePath:  meta.FilePath,
+			Status:    "active",
+		}); repoErr != nil {
+			slog.Warn("repo create failed, metaCache only", "snapshot", meta.Name, "error", repoErr)
+		}
+	}
+
 	// V1-20: Create 后触发 TTL 过期清理
 	sm.cleanupExpired(ctx)
 
@@ -234,8 +266,28 @@ func (sm *SnapshotManager) Create(ctx context.Context, name string) (meta Snapsh
 }
 
 // List 列出所有 YAML 归档快照的元数据。
-// 优先从缓存读取；缓存未预热时触发 warmCache 全量预热。
+// V2-06: 优先从 Repository 读取；失败或 nil 时降级到 metaCache/warmCache。
 func (sm *SnapshotManager) List(ctx context.Context) ([]SnapshotMeta, error) {
+	// V2-06: 优先从 Repository 读取
+	if sm.repo != nil {
+		records, err := sm.repo.List(ctx)
+		if err == nil {
+			metas := make([]SnapshotMeta, 0, len(records))
+			for _, r := range records {
+				metas = append(metas, SnapshotMeta{
+					Name:      r.Name,
+					CreatedAt: r.CreatedAt,
+					NodeCount: r.NodeCount,
+					RelCount:  r.RelCount,
+					FilePath:  r.FilePath,
+				})
+			}
+			return metas, nil
+		}
+		slog.Warn("repo list failed, falling back to cache", "error", err)
+	}
+
+	// Fallback: metaCache
 	sm.cacheMu.RLock()
 	if sm.cacheReady {
 		result := make([]SnapshotMeta, 0, len(sm.metaCache))
@@ -315,6 +367,13 @@ func (sm *SnapshotManager) Delete(ctx context.Context, name string) (err error) 
 	sm.cacheMu.Lock()
 	delete(sm.metaCache, name)
 	sm.cacheMu.Unlock()
+
+	// V2-06: 同步从 Repository 删除
+	if sm.repo != nil {
+		if repoErr := sm.repo.Delete(ctx, name); repoErr != nil && !errors.Is(repoErr, repository.ErrSnapshotNotFound) {
+			slog.Warn("repo delete failed", "snapshot", name, "error", repoErr)
+		}
+	}
 
 	return nil
 }
