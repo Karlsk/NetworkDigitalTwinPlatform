@@ -91,6 +91,14 @@ func WithSnapshotRepository(repo repository.SnapshotRepository) Option {
 	}
 }
 
+// WithAuditRepository 注入 AuditLogRepository，启用后审计日志异步写入 PostgreSQL。
+// V2-09: 双写模式，内存 FIFO + PG 异步持久化。
+func WithAuditRepository(repo repository.AuditLogRepository) Option {
+	return func(sm *SnapshotManager) {
+		sm.auditLog.SetRepository(repo)
+	}
+}
+
 // NewSnapshotManager 创建快照管理器。
 // opts 可通过 WithSnapshotRepository 注入 PostgreSQL 元数据仓库（V2-06）。
 func NewSnapshotManager(g graph.GraphDB, lock *GraphLock, snapDir string, maxActive int, opts ...Option) *SnapshotManager {

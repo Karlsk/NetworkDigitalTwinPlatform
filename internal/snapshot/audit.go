@@ -2,8 +2,12 @@
 package snapshot
 
 import (
+	"context"
+	"log/slog"
 	"sync"
 	"time"
+
+	"gitlab.com/pml/network-digital-twin/internal/repository"
 )
 
 // AuditEntry 审计日志条目。
@@ -25,10 +29,12 @@ type AuditFilter struct {
 }
 
 // AuditLog 审计日志（内存 FIFO，maxEntries 淘汰）。
+// V2-09: 支持可选的 PG 持久化，双写模式：内存同步写 + PG 异步写。
 type AuditLog struct {
 	entries    []AuditEntry
 	mu         sync.RWMutex
 	maxEntries int
+	repo       repository.AuditLogRepository // V2-09: 可选，nil 时仅内存模式
 }
 
 // NewAuditLog 创建审计日志实例。
@@ -39,17 +45,45 @@ func NewAuditLog(maxEntries int) *AuditLog {
 	}
 }
 
-// Record 记录一条审计日志。自动设置 Timestamp，超出 maxEntries 时 FIFO 淘汰旧条目。
-func (l *AuditLog) Record(entry AuditEntry) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
+// SetRepository 设置持久化 Repository，启用后 Record 会异步写入 PG。
+// V2-09: 由 SnapshotManager.WithAuditRepository Option 调用。
+func (l *AuditLog) SetRepository(repo repository.AuditLogRepository) {
+	l.repo = repo
+}
 
+// Record 记录一条审计日志。自动设置 Timestamp，超出 maxEntries 时 FIFO 淘汰旧条目。
+// V2-09: 先同步写内存 FIFO，再异步写 PG（不阻塞主流程）。
+func (l *AuditLog) Record(entry AuditEntry) {
+	// 1. 内存 FIFO（同步，快速查询）
+	l.mu.Lock()
 	entry.Timestamp = time.Now()
 	l.entries = append(l.entries, entry)
-
-	// FIFO 淘汰
 	if len(l.entries) > l.maxEntries {
 		l.entries = l.entries[len(l.entries)-l.maxEntries:]
+	}
+	l.mu.Unlock()
+
+	// 2. PostgreSQL 持久化（异步，不阻塞主流程）
+	if l.repo != nil {
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := l.repo.Create(ctx, toAuditRecord(entry)); err != nil {
+				slog.Error("persist audit log failed", "action", entry.Action, "snapshot", entry.Snapshot, "error", err)
+			}
+		}()
+	}
+}
+
+// toAuditRecord 将 AuditEntry 转换为 repository.AuditLogRecord。
+func toAuditRecord(e AuditEntry) repository.AuditLogRecord {
+	return repository.AuditLogRecord{
+		Timestamp: e.Timestamp,
+		Action:    e.Action,
+		Snapshot:  e.Snapshot,
+		Actor:     e.Actor,
+		Detail:    e.Detail,
+		Error:     e.Error,
 	}
 }
 

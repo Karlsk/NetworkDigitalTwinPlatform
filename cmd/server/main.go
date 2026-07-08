@@ -248,7 +248,10 @@ func main() {
 		snapOpts = append(snapOpts, snapshot.WithSnapshotRepository(
 			repository.NewPGSnapshotRepository(pgPool),
 		))
-		slog.Info("postgresql snapshot repository enabled")
+		snapOpts = append(snapOpts, snapshot.WithAuditRepository(
+			repository.NewPGAuditLogRepository(pgPool),
+		))
+		slog.Info("postgresql snapshot + audit repository enabled")
 	}
 	snapMgr := snapshot.NewSnapshotManager(
 		gdb, lock, cfg.Snapshot.Dir, cfg.Snapshot.MaxActive, snapOpts...,

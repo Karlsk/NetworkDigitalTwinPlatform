@@ -6,6 +6,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"gitlab.com/pml/network-digital-twin/internal/repository"
 )
 
 // ---------------------------------------------------------------------------
@@ -327,5 +329,142 @@ func TestErrStr(t *testing.T) {
 	}
 	if errStr(errors.New("test error")) != "test error" {
 		t.Errorf("errStr(error) = %q, want %q", errStr(errors.New("test error")), "test error")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// V2-09: AuditLog 双写测试
+// ---------------------------------------------------------------------------
+
+// mockAuditLogRepo 模拟 AuditLogRepository，用于测试双写行为。
+type mockAuditLogRepo struct {
+	mu       sync.Mutex
+	records  []repository.AuditLogRecord
+	createFn func(ctx context.Context, r repository.AuditLogRecord) error // 可注入错误
+}
+
+func (m *mockAuditLogRepo) Create(ctx context.Context, r repository.AuditLogRecord) error {
+	if m.createFn != nil {
+		return m.createFn(ctx, r)
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.records = append(m.records, r)
+	return nil
+}
+
+func (m *mockAuditLogRepo) List(_ context.Context, _ int) ([]repository.AuditLogRecord, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.records, nil
+}
+
+func (m *mockAuditLogRepo) Query(_ context.Context, _ repository.AuditFilter) ([]repository.AuditLogRecord, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.records, nil
+}
+
+func (m *mockAuditLogRepo) Count(_ context.Context) (int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return int64(len(m.records)), nil
+}
+
+func (m *mockAuditLogRepo) recordCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.records)
+}
+
+// TestAuditLog_SetRepository 验证 SetRepository 正确设置 repo 字段。
+func TestAuditLog_SetRepository(t *testing.T) {
+	al := NewAuditLog(100)
+	if al.repo != nil {
+		t.Fatal("repo should be nil by default")
+	}
+
+	repo := &mockAuditLogRepo{}
+	al.SetRepository(repo)
+	if al.repo == nil {
+		t.Fatal("repo should be set after SetRepository")
+	}
+}
+
+// TestAuditLog_DualWrite 验证 Record 同时写入内存和 PG。
+func TestAuditLog_DualWrite(t *testing.T) {
+	al := NewAuditLog(100)
+	repo := &mockAuditLogRepo{}
+	al.SetRepository(repo)
+
+	al.Record(AuditEntry{Action: "create", Snapshot: "snap-001", Actor: "system", Detail: "test"})
+
+	// 内存应立即有记录
+	entries := al.Recent(1)
+	if len(entries) != 1 {
+		t.Fatalf("memory: Recent(1) returned %d, want 1", len(entries))
+	}
+	if entries[0].Action != "create" {
+		t.Errorf("memory: Action = %q, want %q", entries[0].Action, "create")
+	}
+
+	// 等待异步 PG 写入完成
+	time.Sleep(50 * time.Millisecond)
+
+	if repo.recordCount() != 1 {
+		t.Fatalf("pg: recordCount = %d, want 1", repo.recordCount())
+	}
+}
+
+// TestAuditLog_PGFailure_MemoryPreserved 验证 PG 失败时内存记录不丢失。
+func TestAuditLog_PGFailure_MemoryPreserved(t *testing.T) {
+	al := NewAuditLog(100)
+	repo := &mockAuditLogRepo{
+		createFn: func(_ context.Context, _ repository.AuditLogRecord) error {
+			return errors.New("pg connection refused")
+		},
+	}
+	al.SetRepository(repo)
+
+	// Record 不应 panic，且内存应有记录
+	al.Record(AuditEntry{Action: "create", Snapshot: "snap-fail", Actor: "system"})
+
+	// 内存应立即有记录
+	entries := al.Recent(1)
+	if len(entries) != 1 {
+		t.Fatalf("memory: Recent(1) returned %d, want 1", len(entries))
+	}
+	if entries[0].Snapshot != "snap-fail" {
+		t.Errorf("memory: Snapshot = %q, want %q", entries[0].Snapshot, "snap-fail")
+	}
+
+	// 等待异步 PG 写入完成（会失败）
+	time.Sleep(50 * time.Millisecond)
+
+	// PG 写入应失败，记录数为 0
+	if repo.recordCount() != 0 {
+		t.Errorf("pg: recordCount = %d, want 0 (PG write should fail)", repo.recordCount())
+	}
+
+	// 内存记录仍然完好
+	entries = al.Recent(1)
+	if len(entries) != 1 {
+		t.Fatalf("memory after PG failure: Recent(1) returned %d, want 1", len(entries))
+	}
+}
+
+// TestAuditLog_NoRepo_MemoryOnly 验证无 repo 时仅写内存，不 panic。
+func TestAuditLog_NoRepo_MemoryOnly(t *testing.T) {
+	al := NewAuditLog(100)
+	// 不设置 repo，仅内存模式
+
+	al.Record(AuditEntry{Action: "create", Snapshot: "snap-mem", Actor: "system"})
+
+	entries := al.Recent(1)
+	if len(entries) != 1 {
+		t.Fatalf("Recent(1) returned %d, want 1", len(entries))
+	}
+	if entries[0].Snapshot != "snap-mem" {
+		t.Errorf("Snapshot = %q, want %q", entries[0].Snapshot, "snap-mem")
 	}
 }
