@@ -48,6 +48,23 @@ services:
       retries: 10
       start_period: 30s
 
+  postgres:
+    image: postgres:17-alpine
+    container_name: postgres-twin
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: twin
+      POSTGRES_PASSWORD: twin
+      POSTGRES_DB: twin
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U twin"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
   app:
     build:
       context: ..
@@ -56,6 +73,8 @@ services:
       neo4j:
         condition: service_healthy
       kafka:
+        condition: service_healthy
+      postgres:
         condition: service_healthy
     ports:
       - "8080:8080"
@@ -73,6 +92,9 @@ services:
       KAFKA_GROUP_ID: "network-twin"
       # 事件总线层 (EventBus Layer)
       EVENT_BUS_MODE: "channel"  # 或 "kafka"，Fallback 仅在此层生效
+      # PostgreSQL 元数据存储 (V2)
+      POSTGRES_ENABLED: "true"
+      POSTGRES_URL: "postgres://twin:twin@postgres:5432/twin?sslmode=disable"
     volumes:
       - ../ontology:/app/ontology:ro
       - snapshot_data:/app/snapshots
@@ -80,4 +102,5 @@ services:
 volumes:
   neo4j_data:
   neo4j_logs:
+  postgres_data:
   snapshot_data:

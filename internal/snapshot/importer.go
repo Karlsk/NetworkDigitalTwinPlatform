@@ -40,6 +40,12 @@ type yamlNodesDocImport struct {
 // importMetaOnly 只解码第一个 YAML 文档（meta），不解码 nodes/rels。
 // 性能提升: 从 O(N*全文档) 降为 O(N*meta文档头)。
 func importMetaOnly(filePath string) (SnapshotMeta, error) {
+	return ImportMetaOnly(filePath)
+}
+
+// ImportMetaOnly 解析 YAML 快照文件的第一个文档（元数据），返回 SnapshotMeta。
+// V2-10: 导出供 cmd/migrate-data 数据迁移工具使用。
+func ImportMetaOnly(filePath string) (SnapshotMeta, error) {
 	data, err := os.ReadFile(filePath)
 	if err != nil {
 		return SnapshotMeta{}, fmt.Errorf("read file for meta: %w", err)
