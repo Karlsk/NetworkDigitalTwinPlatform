@@ -2,10 +2,15 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
+	"sort"
+	"strings"
 	"syscall"
 	"time"
 
@@ -198,6 +203,45 @@ func main() {
 		connRegistry, norm, asm, gdb, lock, publisher, consumer, syncOpts...,
 	)
 
+	// 7.2 V2-08: 启动时同步 connectors.yaml 到 PostgreSQL
+	var connRepo repository.ConnectorConfigRepository
+	if pgPool != nil {
+		connRepo = repository.NewPGConnectorRepository(pgPool)
+		for _, meta := range connRegistry.List() {
+			configJSON, _ := json.Marshal(map[string]any{})
+			etJSON, _ := json.Marshal(meta.EntityTypes)
+			if err := connRepo.Upsert(ctx, repository.ConnectorConfigRecord{
+				Name: meta.Name, Type: meta.Type,
+				Config: configJSON, EntityTypes: etJSON,
+				Status: "active",
+			}); err != nil {
+				slog.Warn("upsert connector config", "name", meta.Name, "error", err)
+			}
+		}
+		slog.Info("connector configs synced to postgresql", "count", len(connRegistry.List()))
+	}
+
+	// 7.3 V2-08: Schema 版本追踪
+	var schemaRepo repository.SchemaVersionRepository
+	if pgPool != nil {
+		schemaRepo = repository.NewPGSchemaVersionRepository(pgPool)
+		currentVersion := computeSchemaVersion(reg)
+		latest, _ := schemaRepo.Latest(ctx)
+		if latest == nil || latest.Version != currentVersion {
+			if err := schemaRepo.Create(ctx, &repository.SchemaVersionRecord{
+				Version:       currentVersion,
+				EntityTypes:   marshalEntityTypes(reg),
+				RelationTypes: marshalRelationTypes(reg),
+				AppliedAt:     time.Now(),
+				Description:   "auto-detected schema change",
+			}); err != nil {
+				slog.Warn("record schema version", "error", err)
+			} else {
+				slog.Info("schema version recorded", "version", currentVersion)
+			}
+		}
+	}
+
 	// 8. 初始化 SnapshotManager
 	var snapOpts []snapshot.Option
 	if pgPool != nil {
@@ -265,4 +309,53 @@ func collectAllLabels(reg schema.SchemaRegistry) []string {
 		}
 	}
 	return labels
+}
+
+// computeSchemaVersion 基于所有 EntityType 名称排序后计算 SHA256 哈希，取前 4 字节转为 int。
+func computeSchemaVersion(reg schema.SchemaRegistry) int {
+	names := make([]string, 0, len(reg.ListEntityTypes()))
+	for _, et := range reg.ListEntityTypes() {
+		names = append(names, et.Metadata.Name)
+	}
+	sort.Strings(names)
+	h := sha256.Sum256([]byte(strings.Join(names, ",")))
+	return int(binary.BigEndian.Uint32(h[:4]))
+}
+
+// marshalEntityTypes 将所有 EntityType 序列化为 JSON。
+func marshalEntityTypes(reg schema.SchemaRegistry) []byte {
+	type etSummary struct {
+		Name   string   `json:"name"`
+		Labels []string `json:"labels,omitempty"`
+	}
+	items := make([]etSummary, 0, len(reg.ListEntityTypes()))
+	for _, et := range reg.ListEntityTypes() {
+		items = append(items, etSummary{
+			Name:   et.Metadata.Name,
+			Labels: et.Metadata.Labels,
+		})
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].Name < items[j].Name })
+	data, _ := json.Marshal(items)
+	return data
+}
+
+// marshalRelationTypes 将所有 RelationType 序列化为 JSON。
+func marshalRelationTypes(reg schema.SchemaRegistry) []byte {
+	type rtSummary struct {
+		Name   string   `json:"name"`
+		Source []string `json:"source"`
+		Target []string `json:"target"`
+	}
+	items := make([]rtSummary, 0, len(reg.ListRelationTypes()))
+	for _, rt := range reg.ListRelationTypes() {
+		items = append(items, rtSummary{
+			Name:   rt.Metadata.Name,
+			Source: rt.Spec.Source,
+			Target: rt.Spec.Target,
+		})
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].Name < items[j].Name })
+	data, _ := json.Marshal(items)
+	return data
 }
