@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"sort"
@@ -14,7 +15,10 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
+	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
+	"gitlab.com/pml/network-digital-twin/internal/api"
 	"gitlab.com/pml/network-digital-twin/internal/assembler"
 	"gitlab.com/pml/network-digital-twin/internal/config"
 	"gitlab.com/pml/network-digital-twin/internal/connector"
@@ -268,24 +272,39 @@ func main() {
 	// 11. 构建 MCP Server 并注册工具
 	mcpServer := intmcp.NewNetworkTwinServer(analysisSvc, snapshotSvc, syncSvc, deviceSvc)
 
-	// 12. 启动 Streamable HTTP MCP Server（goroutine）
+	// 12. 创建 Gin HTTP API Server（V2-11）
+	apiServer := api.NewServer()
+	apiServer.RegisterRoutes(&api.HandlerDeps{
+		SyncSvc:     syncSvc,
+		SnapshotSvc: snapshotSvc,
+		AnalysisSvc: analysisSvc,
+		DeviceSvc:   deviceSvc,
+	})
+
+	// 12.1 MCP 路由嵌入 Gin（/mcp/*path）
+	mcpHandler := mcpsdk.NewStreamableHTTPHandler(
+		func(_ *http.Request) *mcpsdk.Server { return mcpServer }, nil,
+	)
+	apiServer.Engine().Any("/mcp/*path", gin.WrapH(mcpHandler))
+
+	// 13. 启动 Gin HTTP API Server（统一端口 8080）
 	addr := fmt.Sprintf(":%d", cfg.Server.Port)
 	serverErr := make(chan error, 1)
 	go func() {
-		serverErr <- intmcp.RunHTTP(ctx, mcpServer, addr)
+		serverErr <- apiServer.Run(ctx, addr)
 	}()
 
-	// 13. 等待退出信号或服务器错误
+	// 14. 等待退出信号或服务器错误
 	select {
 	case <-ctx.Done():
 		slog.Info("received shutdown signal")
 	case err := <-serverErr:
 		if err != nil {
-			slog.Error("MCP server error", "error", err)
+			slog.Error("HTTP API server error", "error", err)
 		}
 	}
 
-	// 14. 优雅退出：先停 consumer，再停 publisher
+	// 15. 优雅退出：先停 consumer，再停 publisher
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer shutdownCancel()
 
