@@ -64,9 +64,8 @@ func (s *Server) RegisterRoutes(deps *HandlerDeps) {
 	// 创建 Handler 实例
 	syncH := handlers.NewSyncHandler(deps.SyncSvc)
 	snapshotH := handlers.NewSnapshotHandler(deps.SnapshotSvc)
-	topologyH := &handlers.TopologyHandler{Svc: deps.AnalysisSvc}
-	deviceH := &handlers.DeviceHandler{Svc: deps.DeviceSvc}
-	monitorH := &handlers.MonitorHandler{Svc: deps.DeviceSvc}
+	topologyH := handlers.NewTopologyHandler(deps.AnalysisSvc, deps.DeviceSvc)
+	deviceH := handlers.NewDeviceHandler(deps.DeviceSvc)
 
 	// V1 API 路由
 	// Sync
@@ -83,10 +82,13 @@ func (s *Server) RegisterRoutes(deps *HandlerDeps) {
 	// Audit
 	s.router.GET("/audit", snapshotH.QueryAudit)
 
-	// Topology / Device / Monitor (V2-13 stub)
+	// Topology
 	s.router.GET("/topology", topologyH.QueryTopology)
+	s.router.GET("/topology/live", topologyH.QueryTopologyLive)
+
+	// Device / Monitor
 	s.router.GET("/device/:connector/:query_type", deviceH.QueryDeviceInfo)
-	s.router.GET("/monitor/:connector/:query_type", monitorH.QueryMonitor)
+	s.router.GET("/monitor/:connector/:query_type", deviceH.QueryMonitor)
 }
 
 // Run 启动 HTTP 服务器。

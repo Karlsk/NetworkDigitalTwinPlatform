@@ -38,6 +38,26 @@ const (
 	CodeSnapshotNotFound   ErrorCode = 404021 // 快照未找到
 )
 
+// Topology 模块错误码 (MM=03)。
+const (
+	CodeTopologyBadRequest  ErrorCode = 400031 // 拓扑请求参数错误
+	CodeTopologyQueryFailed ErrorCode = 500031 // 拓扑查询失败
+)
+
+// Device 模块错误码 (MM=04)。
+const (
+	CodeDeviceBadRequest  ErrorCode = 400041 // 设备请求参数错误
+	CodeDeviceNotFound    ErrorCode = 404041 // Connector 未找到
+	CodeDeviceUnsupported ErrorCode = 501041 // 设备操作不支持
+)
+
+// Monitor 模块错误码 (MM=05)。
+const (
+	CodeMonitorBadRequest  ErrorCode = 400051 // 监控请求参数错误
+	CodeMonitorNotFound    ErrorCode = 404051 // 监控 Connector 未找到
+	CodeMonitorUnsupported ErrorCode = 501051 // 监控操作不支持
+)
+
 // Response 统一 JSON 响应结构。
 type Response struct {
 	Code    ErrorCode `json:"code"`    // 业务错误码，0 = 成功

@@ -241,25 +241,6 @@ func TestRegisterRoutes(t *testing.T) {
 	srv.engine.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	// 验证仍为 stub 的路由返回 501
-	stubRoutes := []struct {
-		method string
-		path   string
-	}{
-		{http.MethodGet, "/api/v1/topology"},
-		{http.MethodGet, "/api/v1/device/netbox/devices"},
-		{http.MethodGet, "/api/v1/monitor/controller/telemetry"},
-	}
-
-	for _, r := range stubRoutes {
-		t.Run(fmt.Sprintf("%s %s", r.method, r.path), func(t *testing.T) {
-			req := httptest.NewRequest(r.method, r.path, nil)
-			w := httptest.NewRecorder()
-			srv.engine.ServeHTTP(w, req)
-			assert.Equal(t, http.StatusNotImplemented, w.Code, "%s %s should return 501", r.method, r.path)
-		})
-	}
-
 	// 验证 404 处理
 	req = httptest.NewRequest(http.MethodGet, "/nonexistent", nil)
 	w = httptest.NewRecorder()

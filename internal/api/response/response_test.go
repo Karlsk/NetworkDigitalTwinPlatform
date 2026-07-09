@@ -133,4 +133,18 @@ func TestErrorCodeConstants(t *testing.T) {
 	// Snapshot 模块 (MM=02)
 	assert.Equal(t, ErrorCode(400021), CodeSnapshotBadRequest)
 	assert.Equal(t, ErrorCode(404021), CodeSnapshotNotFound)
+
+	// Topology 模块 (MM=03)
+	assert.Equal(t, ErrorCode(400031), CodeTopologyBadRequest)
+	assert.Equal(t, ErrorCode(500031), CodeTopologyQueryFailed)
+
+	// Device 模块 (MM=04)
+	assert.Equal(t, ErrorCode(400041), CodeDeviceBadRequest)
+	assert.Equal(t, ErrorCode(404041), CodeDeviceNotFound)
+	assert.Equal(t, ErrorCode(501041), CodeDeviceUnsupported)
+
+	// Monitor 模块 (MM=05)
+	assert.Equal(t, ErrorCode(400051), CodeMonitorBadRequest)
+	assert.Equal(t, ErrorCode(404051), CodeMonitorNotFound)
+	assert.Equal(t, ErrorCode(501051), CodeMonitorUnsupported)
 }
