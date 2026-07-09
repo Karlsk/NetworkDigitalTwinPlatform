@@ -115,13 +115,22 @@ func TestNotImplemented(t *testing.T) {
 }
 
 func TestErrorCodeConstants(t *testing.T) {
-	// 验证错误码常量符合规范
-	assert.Equal(t, 0, CodeSuccess)
-	assert.Equal(t, 40001, CodeBadRequest)
-	assert.Equal(t, 40101, CodeUnauthorized)
-	assert.Equal(t, 40401, CodeNotFound)
-	assert.Equal(t, 50101, CodeNotImplemented)
-	assert.Equal(t, 42901, CodeRateLimitExceed)
-	assert.Equal(t, 50001, CodeInternalError)
-	assert.Equal(t, 50301, CodeCircuitBreakOpen)
+	// 验证错误码常量符合 6 位 HHHMMX 规范
+	// 通用模块 (MM=00)
+	assert.Equal(t, ErrorCode(0), CodeSuccess)
+	assert.Equal(t, ErrorCode(400001), CodeBadRequest)
+	assert.Equal(t, ErrorCode(401001), CodeUnauthorized)
+	assert.Equal(t, ErrorCode(404001), CodeNotFound)
+	assert.Equal(t, ErrorCode(429001), CodeRateLimitExceed)
+	assert.Equal(t, ErrorCode(500001), CodeInternalError)
+	assert.Equal(t, ErrorCode(501001), CodeNotImplemented)
+	assert.Equal(t, ErrorCode(503001), CodeCircuitBreakOpen)
+
+	// Sync 模块 (MM=01)
+	assert.Equal(t, ErrorCode(400011), CodeSyncUnsupportedAction)
+	assert.Equal(t, ErrorCode(503011), CodeSyncQueueFull)
+
+	// Snapshot 模块 (MM=02)
+	assert.Equal(t, ErrorCode(400021), CodeSnapshotBadRequest)
+	assert.Equal(t, ErrorCode(404021), CodeSnapshotNotFound)
 }

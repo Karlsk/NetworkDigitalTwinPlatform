@@ -6,6 +6,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"golang.org/x/time/rate"
+
+	"gitlab.com/pml/network-digital-twin/internal/api/response"
 )
 
 // RateLimit 返回令牌桶限流中间件。
@@ -15,10 +17,7 @@ func RateLimit(rps int, burst int) gin.HandlerFunc {
 
 	return func(c *gin.Context) {
 		if !limiter.Allow() {
-			c.JSON(http.StatusTooManyRequests, gin.H{
-				"code":    42901,
-				"message": "rate limit exceeded",
-			})
+			response.Fail(c, http.StatusTooManyRequests, response.CodeRateLimitExceed, "rate limit exceeded")
 			c.Abort()
 			return
 		}

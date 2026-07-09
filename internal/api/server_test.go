@@ -119,7 +119,7 @@ func TestStandardizedErrorResponse(t *testing.T) {
 	tests := []struct {
 		name     string
 		httpCode int
-		errCode  int
+		errCode  response.ErrorCode
 		msg      string
 	}{
 		{"bad request", http.StatusBadRequest, response.CodeBadRequest, "invalid parameter"},
@@ -217,7 +217,7 @@ func TestRateLimitMiddleware(t *testing.T) {
 	var body map[string]any
 	err := json.Unmarshal(w.Body.Bytes(), &body)
 	require.NoError(t, err)
-	assert.Equal(t, float64(42901), body["code"])
+	assert.Equal(t, float64(429001), body["code"])
 	assert.Equal(t, "rate limit exceeded", body["message"])
 }
 
@@ -241,16 +241,11 @@ func TestRegisterRoutes(t *testing.T) {
 	srv.engine.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	// 验证所有 stub 路由返回 501
+	// 验证仍为 stub 的路由返回 501
 	stubRoutes := []struct {
 		method string
 		path   string
 	}{
-		{http.MethodPost, "/api/v1/sync"},
-		{http.MethodGet, "/api/v1/snapshot"},
-		{http.MethodPost, "/api/v1/snapshot"},
-		{http.MethodDelete, "/api/v1/snapshot/test"},
-		{http.MethodPost, "/api/v1/snapshot/restore"},
 		{http.MethodGet, "/api/v1/topology"},
 		{http.MethodGet, "/api/v1/device/netbox/devices"},
 		{http.MethodGet, "/api/v1/monitor/controller/telemetry"},
@@ -345,7 +340,7 @@ func TestCircuitBreaker(t *testing.T) {
 	var body map[string]any
 	err := json.Unmarshal(w.Body.Bytes(), &body)
 	require.NoError(t, err)
-	assert.Equal(t, float64(50301), body["code"])
+	assert.Equal(t, float64(503001), body["code"])
 	assert.Contains(t, body["message"], "circuit breaker")
 
 	// 等待超时后，熔断器应进入半开状态

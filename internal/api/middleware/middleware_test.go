@@ -154,7 +154,7 @@ func TestCircuitBreaker_Middleware_FullCycle(t *testing.T) {
 	var body map[string]any
 	err := json.Unmarshal(w.Body.Bytes(), &body)
 	require.NoError(t, err)
-	assert.Equal(t, float64(50301), body["code"])
+	assert.Equal(t, float64(503001), body["code"])
 	assert.Contains(t, body["message"], "circuit breaker")
 
 	// 4. 等待超时 → HalfOpen
@@ -243,7 +243,7 @@ func TestRateLimit_ExceedBurst(t *testing.T) {
 	var body map[string]any
 	err := json.Unmarshal(w.Body.Bytes(), &body)
 	require.NoError(t, err)
-	assert.Equal(t, float64(42901), body["code"])
+	assert.Equal(t, float64(429001), body["code"])
 	assert.Equal(t, "rate limit exceeded", body["message"])
 }
 

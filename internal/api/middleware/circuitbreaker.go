@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+
+	"gitlab.com/pml/network-digital-twin/internal/api/response"
 )
 
 // CircuitState 熔断器状态。
@@ -97,10 +99,7 @@ func CircuitBreaker(threshold int, timeout time.Duration) gin.HandlerFunc {
 
 	return func(c *gin.Context) {
 		if !cb.allow() {
-			c.JSON(http.StatusServiceUnavailable, gin.H{
-				"code":    50301,
-				"message": "service unavailable, circuit breaker open",
-			})
+			response.Fail(c, http.StatusServiceUnavailable, response.CodeCircuitBreakOpen, "service unavailable, circuit breaker open")
 			c.Abort()
 			return
 		}

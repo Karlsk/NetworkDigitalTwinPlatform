@@ -60,7 +60,6 @@ func TestStubHandlers_ResponseFormat(t *testing.T) {
 		method string
 		path   string
 	}{
-		{http.MethodPost, "/api/v1/sync"},
 		{http.MethodGet, "/api/v1/topology"},
 	}
 
@@ -178,7 +177,7 @@ func TestRateLimit_UnderLoad(t *testing.T) {
 			var body map[string]any
 			err := json.Unmarshal(w.Body.Bytes(), &body)
 			require.NoError(t, err)
-			assert.Equal(t, float64(42901), body["code"])
+			assert.Equal(t, float64(429001), body["code"])
 		}
 	}
 
@@ -219,7 +218,7 @@ func TestCircuitBreaker_ThreeStateTransition(t *testing.T) {
 		var body map[string]any
 		err := json.Unmarshal(w.Body.Bytes(), &body)
 		require.NoError(t, err)
-		assert.Equal(t, float64(50301), body["code"])
+		assert.Equal(t, float64(503001), body["code"])
 	}
 
 	// 阶段 3: 等待超时 → HalfOpen
