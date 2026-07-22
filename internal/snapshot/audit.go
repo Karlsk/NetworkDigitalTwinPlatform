@@ -13,11 +13,11 @@ import (
 // AuditEntry 审计日志条目。
 type AuditEntry struct {
 	Timestamp time.Time `json:"timestamp"`
-	Action    string    `json:"action"`           // "create", "restore", "delete", "diff"
-	Snapshot  string    `json:"snapshot"`          // 快照名称
-	Actor     string    `json:"actor"`             // 操作来源 ("mcp", "webhook", "system")
-	Detail    string    `json:"detail"`            // 详情 (如 "nodes=21, rels=30")
-	Error     string    `json:"error,omitempty"`   // 如果有错误
+	Action    string    `json:"action"`          // "create", "restore", "delete", "diff"
+	Snapshot  string    `json:"snapshot"`        // 快照名称
+	Actor     string    `json:"actor"`           // 操作来源 ("mcp", "webhook", "system")
+	Detail    string    `json:"detail"`          // 详情 (如 "nodes=21, rels=30")
+	Error     string    `json:"error,omitempty"` // 如果有错误
 }
 
 // AuditFilter 审计查询过滤器。

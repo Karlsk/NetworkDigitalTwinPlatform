@@ -2,6 +2,7 @@ package schema
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"testing"
 
@@ -387,7 +388,7 @@ spec:
 	for {
 		var doc RelationType
 		err := decoder.Decode(&doc)
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			break
 		}
 		if err != nil {
@@ -434,7 +435,7 @@ spec:
 	for {
 		var doc RelationType
 		err := decoder.Decode(&doc)
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			break
 		}
 		if err != nil {

@@ -12,8 +12,8 @@ type Alarm struct {
 
 // RCAResult 根因分析结果。
 type RCAResult struct {
-	RootCause   string   // 根因节点 URI
-	Confidence  float64  // 置信度 (0.0~1.0)
+	RootCause     string   // 根因节点 URI
+	Confidence    float64  // 置信度 (0.0~1.0)
 	RelatedAlarms []string // 关联告警
 }
 

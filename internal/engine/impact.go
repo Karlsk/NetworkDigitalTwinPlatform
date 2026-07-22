@@ -11,10 +11,10 @@ var ErrNotImplemented = errors.New("engine: not implemented")
 
 // ImpactResult 影响分析结果。
 type ImpactResult struct {
-	SourceNode     string          // 源节点 URI
-	AffectedNodes  []AffectedNode  // 受影响节点列表
-	AffectedRels   []AffectedRel   // 受影响关系列表
-	MaxDepth       int             // 分析深度
+	SourceNode    string         // 源节点 URI
+	AffectedNodes []AffectedNode // 受影响节点列表
+	AffectedRels  []AffectedRel  // 受影响关系列表
+	MaxDepth      int            // 分析深度
 }
 
 // AffectedNode 受影响节点。

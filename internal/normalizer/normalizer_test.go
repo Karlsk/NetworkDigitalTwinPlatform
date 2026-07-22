@@ -639,8 +639,5 @@ func TestNormalize_FullPipeline_ISIS(t *testing.T) {
 	if v := nr.Properties["status"]; v != "Active" {
 		t.Errorf("status = %v, want %q (default)", v, "Active")
 	}
-	// relation field preserved
-	if _, ok := nr.Properties["run_on"]; !ok {
-		// run_on is not in props because it was not provided, that's fine
-	}
+	// relation field preserved (run_on not provided → not in props)
 }

@@ -76,7 +76,7 @@ var _ neo4j.DriverWithContext = (*mockDriver)(nil)
 func withMockDriver(t *testing.T, md *mockDriver) {
 	t.Helper()
 	origFactory := driverFactory
-	driverFactory = func(_ string, _ auth.TokenManager, _ ...func(*neo4j.Config)) (neo4j.DriverWithContext, error) {
+	driverFactory = func(_ string, _ auth.TokenManager, _ ...func(*neo4j.Config)) (neo4j.DriverWithContext, error) { //nolint:staticcheck // neo4j.Config 将在 6.0 废弃
 		return md, nil
 	}
 	t.Cleanup(func() { driverFactory = origFactory })
@@ -2505,4 +2505,62 @@ func TestEnsureIndexes_RunError(t *testing.T) {
 	if !errors.Is(err, wantErr) {
 		t.Errorf("error should wrap original error, got: %v", err)
 	}
+}
+
+// TestJoinLabels 验证 joinLabels 各分支。
+func TestJoinLabels(t *testing.T) {
+	t.Run("empty", func(t *testing.T) {
+		if got := joinLabels(nil); got != "" {
+			t.Errorf("joinLabels(nil) = %q, want empty", got)
+		}
+	})
+	t.Run("single", func(t *testing.T) {
+		if got := joinLabels([]string{"Device"}); got != ":Device" {
+			t.Errorf("joinLabels([Device]) = %q, want :Device", got)
+		}
+	})
+	t.Run("multi", func(t *testing.T) {
+		if got := joinLabels([]string{"Device", "Router"}); got != ":Device:Router" {
+			t.Errorf("joinLabels([Device,Router]) = %q, want :Device:Router", got)
+		}
+	})
+}
+
+// TestGroupCloneNodesByLabels 验证 groupCloneNodesByLabels 各分支。
+func TestGroupCloneNodesByLabels(t *testing.T) {
+	t.Run("string_labels", func(t *testing.T) {
+		nodes := []map[string]any{
+			{"labels": []string{"Device"}, "uri": "d:1"},
+			{"labels": []string{"Device"}, "uri": "d:2"},
+			{"labels": []string{"Interface"}, "uri": "i:1"},
+		}
+		groups := groupCloneNodesByLabels(nodes)
+		if len(groups) != 2 {
+			t.Errorf("expected 2 groups, got %d", len(groups))
+		}
+		if len(groups["Device"]) != 2 {
+			t.Errorf("Device group should have 2 nodes, got %d", len(groups["Device"]))
+		}
+	})
+	t.Run("any_labels", func(t *testing.T) {
+		nodes := []map[string]any{
+			{"labels": []any{"Router", "Device"}, "uri": "r:1"},
+		}
+		groups := groupCloneNodesByLabels(nodes)
+		if len(groups) != 1 {
+			t.Errorf("expected 1 group, got %d", len(groups))
+		}
+		if _, ok := groups["Router:Device"]; !ok {
+			t.Errorf("expected key Router:Device, got keys: %v", groups)
+		}
+	})
+	t.Run("no_labels", func(t *testing.T) {
+		nodes := []map[string]any{
+			{"uri": "x:1"},
+		}
+		groups := groupCloneNodesByLabels(nodes)
+		if len(groups) != 0 {
+			t.Errorf("expected 0 groups for node without labels, got %d", len(groups))
+		}
+	})
 }

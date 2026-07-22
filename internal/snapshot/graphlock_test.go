@@ -19,8 +19,8 @@ func TestNewGraphLock(t *testing.T) {
 func TestGraphLock_WriteLockMutualExclusion(t *testing.T) {
 	lock := NewGraphLock()
 
-	held := make(chan struct{})  // A 持有锁后通知
-	done := make(chan struct{})  // B 获取到锁后通知
+	held := make(chan struct{}) // A 持有锁后通知
+	done := make(chan struct{}) // B 获取到锁后通知
 
 	// goroutine A: 获取锁 → 通知 → sleep 50ms → 释放锁
 	go func() {
@@ -104,8 +104,8 @@ func TestGraphLock_ReadLockSharing(t *testing.T) {
 func TestGraphLock_ReadWriteExclusion(t *testing.T) {
 	lock := NewGraphLock()
 
-	held := make(chan struct{})  // A 持有读锁后通知
-	done := make(chan struct{})  // B 获取到写锁后通知
+	held := make(chan struct{}) // A 持有读锁后通知
+	done := make(chan struct{}) // B 获取到写锁后通知
 
 	// goroutine A: 获取读锁 → 通知 → sleep 50ms → 释放读锁
 	go func() {

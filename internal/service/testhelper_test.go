@@ -25,8 +25,8 @@ type mockGraphDB struct {
 	queryErr           error
 
 	// 可配置返回数据
-	queryResults  []map[string]any
-	hasDBResult   map[string]bool // db name → 是否存在
+	queryResults []map[string]any
+	hasDBResult  map[string]bool // db name → 是否存在
 
 	// 记录调用参数
 	clearDBCalls         []string

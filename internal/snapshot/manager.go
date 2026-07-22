@@ -15,6 +15,7 @@ import (
 
 	"gitlab.com/pml/network-digital-twin/internal/assembler"
 	"gitlab.com/pml/network-digital-twin/internal/graph"
+	"gitlab.com/pml/network-digital-twin/internal/observability"
 	"gitlab.com/pml/network-digital-twin/internal/repository"
 )
 
@@ -67,18 +68,18 @@ type RelChange struct {
 // SnapshotManager 管理快照的创建、存储、恢复和清理。
 // 通过 YAML 多文档文件实现快照归档，通过 Neo4j 逻辑 DB 实现活跃快照。
 type SnapshotManager struct {
-	graph      graph.GraphDB
-	lock       *GraphLock
-	snapDir    string
-	maxActive  int
-	lastAccess map[string]time.Time
-	mu         sync.Mutex // 保护 lastAccess
-	metaCache  map[string]SnapshotMeta // 新增: name → meta 缓存
-	cacheMu    sync.RWMutex            // 新增: 缓存读写锁
-	cacheReady bool                    // 新增: 缓存是否已预热
-	auditLog   *AuditLog               // V1-18: 审计日志
-	retentionDays int                  // V1-20: TTL 保留天数，0 = 不自动清理
-	repo       repository.SnapshotRepository // V2-06: 元数据持久化（nil 时走 metaCache）
+	graph         graph.GraphDB
+	lock          *GraphLock
+	snapDir       string
+	maxActive     int
+	lastAccess    map[string]time.Time
+	mu            sync.Mutex                    // 保护 lastAccess
+	metaCache     map[string]SnapshotMeta       // 新增: name → meta 缓存
+	cacheMu       sync.RWMutex                  // 新增: 缓存读写锁
+	cacheReady    bool                          // 新增: 缓存是否已预热
+	auditLog      *AuditLog                     // V1-18: 审计日志
+	retentionDays int                           // V1-20: TTL 保留天数，0 = 不自动清理
+	repo          repository.SnapshotRepository // V2-06: 元数据持久化（nil 时走 metaCache）
 }
 
 // Option SnapshotManager 可选依赖注入（V2-06）。
@@ -148,7 +149,7 @@ func (sm *SnapshotManager) cleanupExpired(ctx context.Context) {
 			slog.Warn("cleanup expired snapshot failed", "snapshot", name, "error", err)
 		} else {
 			slog.Info("cleaned up expired snapshot", "snapshot", name)
-			sm.auditLog.Record(AuditEntry{
+			sm.auditLog.Record(AuditEntry{ //nolint:contextcheck // 审计记录无需 context
 				Action:   "auto_delete",
 				Snapshot: name,
 				Actor:    "system",
@@ -165,7 +166,7 @@ func (sm *SnapshotManager) Create(ctx context.Context, name string) (meta Snapsh
 	defer sm.lock.RUnlock()
 
 	// V1-18: 审计日志 — 无论成功失败都记录
-	defer func() {
+	defer func() { //nolint:contextcheck // defer 闭包中无法传递 ctx
 		sm.auditLog.Record(AuditEntry{
 			Action:   "create",
 			Snapshot: name,
@@ -173,6 +174,13 @@ func (sm *SnapshotManager) Create(ctx context.Context, name string) (meta Snapsh
 			Detail:   fmt.Sprintf("nodes=%d, rels=%d", meta.NodeCount, meta.RelCount),
 			Error:    errStr(err),
 		})
+		// V2-15: Prometheus 指标上报
+		if err != nil {
+			observability.SnapshotOperationsTotal.WithLabelValues("create", "error").Inc()
+		} else {
+			observability.SnapshotOperationsTotal.WithLabelValues("create", "success").Inc()
+			observability.SnapshotCount.Inc()
+		}
 	}()
 
 	// 分页读取 default DB 全部节点（SKIP/LIMIT 防止大数据集 OOM）
@@ -351,7 +359,7 @@ func (sm *SnapshotManager) warmCache(_ context.Context) ([]SnapshotMeta, error) 
 // Delete 删除快照：清理 Neo4j 逻辑 DB，保留 YAML 归档文件。
 func (sm *SnapshotManager) Delete(ctx context.Context, name string) (err error) {
 	// V1-18: 审计日志 — 无论成功失败都记录
-	defer func() {
+	defer func() { //nolint:contextcheck // defer 闭包中无法传递 ctx
 		sm.auditLog.Record(AuditEntry{
 			Action:   "delete",
 			Snapshot: name,
@@ -359,6 +367,13 @@ func (sm *SnapshotManager) Delete(ctx context.Context, name string) (err error) 
 			Detail:   "delete snapshot",
 			Error:    errStr(err),
 		})
+		// V2-15: Prometheus 指标上报
+		if err != nil {
+			observability.SnapshotOperationsTotal.WithLabelValues("delete", "error").Inc()
+		} else {
+			observability.SnapshotOperationsTotal.WithLabelValues("delete", "success").Inc()
+			observability.SnapshotCount.Dec()
+		}
 	}()
 
 	exists, hasErr := sm.graph.HasDB(ctx, name)
@@ -425,7 +440,7 @@ func (sm *SnapshotManager) Restore(ctx context.Context, name string) (err error)
 	defer sm.lock.Unlock()
 
 	// V1-18: 审计日志 — 无论成功失败都记录
-	defer func() {
+	defer func() { //nolint:contextcheck // defer 闭包中无法传递 ctx
 		sm.auditLog.Record(AuditEntry{
 			Action:   "restore",
 			Snapshot: name,
@@ -433,6 +448,12 @@ func (sm *SnapshotManager) Restore(ctx context.Context, name string) (err error)
 			Detail:   "restore to default",
 			Error:    errStr(err),
 		})
+		// V2-15: Prometheus 指标上报
+		if err != nil {
+			observability.SnapshotOperationsTotal.WithLabelValues("restore", "error").Inc()
+		} else {
+			observability.SnapshotOperationsTotal.WithLabelValues("restore", "success").Inc()
+		}
 	}()
 
 	if loadErr := sm.EnsureLoaded(ctx, name); loadErr != nil {
@@ -483,15 +504,24 @@ func (sm *SnapshotManager) EnsureLoaded(ctx context.Context, name string) error 
 
 // Diff 使用 Neo4j Cypher 差集查询对比两个快照。
 // 返回 b 相对于 a 的新增和删除。
-func (sm *SnapshotManager) Diff(ctx context.Context, a, b string) (*SnapshotDiff, error) {
-	if err := sm.EnsureLoaded(ctx, a); err != nil {
+func (sm *SnapshotManager) Diff(ctx context.Context, a, b string) (diff *SnapshotDiff, err error) {
+	// V2-15: Prometheus 指标上报
+	defer func() {
+		if err != nil {
+			observability.SnapshotOperationsTotal.WithLabelValues("diff", "error").Inc()
+		} else {
+			observability.SnapshotOperationsTotal.WithLabelValues("diff", "success").Inc()
+		}
+	}()
+
+	if err = sm.EnsureLoaded(ctx, a); err != nil {
 		return nil, fmt.Errorf("ensure loaded a: %w", err)
 	}
-	if err := sm.EnsureLoaded(ctx, b); err != nil {
+	if err = sm.EnsureLoaded(ctx, b); err != nil {
 		return nil, fmt.Errorf("ensure loaded b: %w", err)
 	}
 
-	diff := &SnapshotDiff{}
+	diff = &SnapshotDiff{}
 
 	// b 中有而 a 中没有的节点（新增）
 	addedNodeRows, err := sm.graph.Query(ctx, b,

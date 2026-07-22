@@ -36,7 +36,7 @@ type MonitorRequest struct {
 	Port          string    `json:"port,omitempty"`
 	VPNID         string    `json:"vpn_id,omitempty"`
 	Tunnel        string    `json:"tunnel,omitempty"`
-	Metrics       []string  `json:"metrics"`        // 指标名列表
+	Metrics       []string  `json:"metrics"` // 指标名列表
 	Namespace     string    `json:"namespace,omitempty"`
 	Interval      string    `json:"interval,omitempty"`
 	StartTime     time.Time `json:"start_time,omitempty"`

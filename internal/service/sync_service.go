@@ -13,6 +13,7 @@ import (
 	"gitlab.com/pml/network-digital-twin/internal/events"
 	"gitlab.com/pml/network-digital-twin/internal/graph"
 	"gitlab.com/pml/network-digital-twin/internal/normalizer"
+	"gitlab.com/pml/network-digital-twin/internal/observability"
 	"gitlab.com/pml/network-digital-twin/internal/repository"
 	"gitlab.com/pml/network-digital-twin/internal/snapshot"
 )
@@ -49,9 +50,9 @@ type SyncService struct {
 	assembler   *assembler.GraphAssembler
 	graph       graph.GraphDB
 	lock        *snapshot.GraphLock
-	publisher   events.EventPublisher            // 事件写入端（Channel 或 Kafka 实现）
-	consumer    events.EventConsumer             // 事件消费端（与 publisher 共享底层通道）
-	syncLogRepo repository.SyncLogRepository     // V2-07: 同步日志（可为 nil）
+	publisher   events.EventPublisher        // 事件写入端（Channel 或 Kafka 实现）
+	consumer    events.EventConsumer         // 事件消费端（与 publisher 共享底层通道）
+	syncLogRepo repository.SyncLogRepository // V2-07: 同步日志（可为 nil）
 }
 
 // SyncOption SyncService 选项函数。
@@ -104,6 +105,7 @@ func (s *SyncService) FullSync(ctx context.Context) (*SyncResult, error) {
 
 	// 2. ClearDB
 	if err := s.graph.ClearDB(ctx, "default"); err != nil {
+		observability.SyncOperationsTotal.WithLabelValues("full", "error").Inc()
 		s.recordSyncLog(ctx, "full", "failed", nil, start, err)
 		return nil, fmt.Errorf("clear db: %w", err)
 	}
@@ -140,11 +142,13 @@ func (s *SyncService) FullSync(ctx context.Context) (*SyncResult, error) {
 	// 5. 组装图模型
 	model, warnings, err := s.assembler.Assemble(allNormalized)
 	if err != nil {
+		observability.SyncOperationsTotal.WithLabelValues("full", "error").Inc()
 		return nil, fmt.Errorf("assemble graph: %w", err)
 	}
 
 	// 6. 批量写入 Neo4j
 	if err := s.graph.BulkCreate(ctx, "default", model.Nodes, model.Relations); err != nil {
+		observability.SyncOperationsTotal.WithLabelValues("full", "error").Inc()
 		s.recordSyncLog(ctx, "full", "failed", nil, start, err)
 		return nil, fmt.Errorf("bulk create: %w", err)
 	}
@@ -158,11 +162,18 @@ func (s *SyncService) FullSync(ctx context.Context) (*SyncResult, error) {
 
 	result := &SyncResult{
 		NodesCreated:       len(model.Nodes),
-		RelationsCreated:  len(model.Relations),
+		RelationsCreated:   len(model.Relations),
 		OrphanEdgesSkipped: len(warnings),
 		Warnings:           warnings,
 		Duration:           time.Since(start),
 	}
+
+	// V2-15: Prometheus 指标上报
+	duration := time.Since(start).Seconds()
+	observability.SyncOperationsTotal.WithLabelValues("full", "success").Inc()
+	observability.SyncDuration.WithLabelValues("full").Observe(duration)
+	observability.SyncNodesCreated.Add(float64(result.NodesCreated))
+	observability.SyncRelationsCreated.Add(float64(result.RelationsCreated))
 
 	// V2-07: 记录同步日志
 	s.recordSyncLog(ctx, "full", "success", result, start, nil)
@@ -202,39 +213,57 @@ func (s *SyncService) IncrementalSync(ctx context.Context, event SyncEvent) (*Sy
 		// 3. Assembler
 		model, warnings, err := s.assembler.Assemble(normalized)
 		if err != nil {
+			observability.SyncOperationsTotal.WithLabelValues("incremental", "error").Inc()
 			return nil, fmt.Errorf("assemble graph: %w", err)
 		}
 
 		// 4. Upsert (MERGE + SET +=)
 		if err := s.graph.Upsert(ctx, "default", model.Nodes, model.Relations); err != nil {
+			observability.SyncOperationsTotal.WithLabelValues("incremental", "error").Inc()
 			return nil, fmt.Errorf("upsert: %w", err)
 		}
 
 		result := &SyncResult{
 			NodesCreated:       len(model.Nodes),
-			RelationsCreated:  len(model.Relations),
+			RelationsCreated:   len(model.Relations),
 			OrphanEdgesSkipped: len(warnings),
 			Warnings:           warnings,
 			Duration:           time.Since(start),
 		}
+
+		// V2-15: Prometheus 指标上报
+		duration := time.Since(start).Seconds()
+		observability.SyncOperationsTotal.WithLabelValues("incremental", "success").Inc()
+		observability.SyncDuration.WithLabelValues("incremental").Observe(duration)
+		observability.SyncNodesCreated.Add(float64(result.NodesCreated))
+		observability.SyncRelationsCreated.Add(float64(result.RelationsCreated))
+
 		s.recordSyncLog(ctx, "incremental", "success", result, start, nil)
 		return result, nil
 
 	case "delete":
 		if err := s.graph.DeleteByURIs(ctx, "default", event.URIs); err != nil {
+			observability.SyncOperationsTotal.WithLabelValues("incremental", "error").Inc()
 			s.recordSyncLog(ctx, "incremental", "failed", nil, start, err)
 			return nil, fmt.Errorf("delete by uris: %w", err)
 		}
 		result := &SyncResult{Duration: time.Since(start)}
+		duration := time.Since(start).Seconds()
+		observability.SyncOperationsTotal.WithLabelValues("incremental", "success").Inc()
+		observability.SyncDuration.WithLabelValues("incremental").Observe(duration)
 		s.recordSyncLog(ctx, "incremental", "success", result, start, nil)
 		return result, nil
 
 	case "delete_relation":
 		if err := s.graph.DeleteRelations(ctx, "default", event.Relations); err != nil {
+			observability.SyncOperationsTotal.WithLabelValues("incremental", "error").Inc()
 			s.recordSyncLog(ctx, "incremental", "failed", nil, start, err)
 			return nil, fmt.Errorf("delete relations: %w", err)
 		}
 		result := &SyncResult{Duration: time.Since(start)}
+		duration := time.Since(start).Seconds()
+		observability.SyncOperationsTotal.WithLabelValues("incremental", "success").Inc()
+		observability.SyncDuration.WithLabelValues("incremental").Observe(duration)
 		s.recordSyncLog(ctx, "incremental", "success", result, start, nil)
 		return result, nil
 
@@ -304,9 +333,9 @@ func (s *SyncService) recordSyncLog(
 	}
 
 	rec := repository.SyncLogRecord{
-		SyncType:  syncType,
-		Status:    status,
-		StartedAt: start,
+		SyncType:    syncType,
+		Status:      status,
+		StartedAt:   start,
 		CompletedAt: time.Now(),
 	}
 

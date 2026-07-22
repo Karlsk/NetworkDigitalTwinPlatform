@@ -32,8 +32,8 @@ func (nopEventBus) Consume(ctx context.Context, handler func(ctx context.Context
 
 // testEventBus 基于 Channel 的事件总线测试辅助（用于 HandleWebhook / StartConsumer 测试）。
 type testEventBus struct {
-	pub  events.EventPublisher
-	con  events.EventConsumer
+	pub events.EventPublisher
+	con events.EventConsumer
 }
 
 func newTestEventBus(bufferSize int) *testEventBus {
@@ -454,8 +454,8 @@ func TestFullSync_ConcurrentMutualExclusion(t *testing.T) {
 // concurrentMockGraphDB 用于并发测试的 GraphDB mock。
 type concurrentMockGraphDB struct {
 	mockGraphDB
-	onBulkCreate    func()
-	onDeleteByURIs  func()
+	onBulkCreate   func()
+	onDeleteByURIs func()
 }
 
 func (m *concurrentMockGraphDB) BulkCreate(_ context.Context, _ string, nodes []assembler.Node, rels []assembler.Relation) error {
@@ -1057,8 +1057,8 @@ func TestStartConsumer_StopsOnContextCancel(t *testing.T) {
 
 // mockSyncLogRepo 用于测试的 SyncLogRepository mock。
 type mockSyncLogRepo struct {
-	mu      sync.Mutex
-	records []repository.SyncLogRecord
+	mu        sync.Mutex
+	records   []repository.SyncLogRecord
 	createErr error // 注入错误
 }
 

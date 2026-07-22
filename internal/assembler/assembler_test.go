@@ -35,24 +35,6 @@ func findRelation(rels []Relation, relType, from, to string) (Relation, bool) {
 	return Relation{}, false
 }
 
-// findWarning 在 ValidationWarning 切片中查找匹配 type+detail 子串的警告。
-func findWarning(warnings []ValidationWarning, warnType, detailSubstr string) (ValidationWarning, bool) {
-	for _, w := range warnings {
-		if w.Type == warnType && containsStr([]string{w.Detail}, detailSubstr) {
-			return w, true
-		}
-		// 简单子串检查
-		if w.Type == warnType {
-			for i := 0; i <= len(w.Detail)-len(detailSubstr); i++ {
-				if w.Detail[i:i+len(detailSubstr)] == detailSubstr {
-					return w, true
-				}
-			}
-		}
-	}
-	return ValidationWarning{}, false
-}
-
 // findWarningDetail 检查警告切片中是否有包含指定子串的 Detail。
 func findWarningDetail(warnings []ValidationWarning, substr string) bool {
 	for _, w := range warnings {
@@ -382,10 +364,10 @@ type mockRegistry struct {
 	relationTypes map[string]*schema.RelationType
 }
 
-func (m *mockRegistry) Load(_ string) error                                     { return nil }
-func (m *mockRegistry) ListEntityTypes() []*schema.EntityType                   { return nil }
-func (m *mockRegistry) ListRelationTypes() []*schema.RelationType               { return nil }
-func (m *mockRegistry) Validate(_ string, _ map[string]any) error               { return nil }
+func (m *mockRegistry) Load(_ string) error                       { return nil }
+func (m *mockRegistry) ListEntityTypes() []*schema.EntityType     { return nil }
+func (m *mockRegistry) ListRelationTypes() []*schema.RelationType { return nil }
+func (m *mockRegistry) Validate(_ string, _ map[string]any) error { return nil }
 func (m *mockRegistry) ApplyDefaults(_ string, p map[string]any) (map[string]any, error) {
 	return p, nil
 }
@@ -858,10 +840,10 @@ func TestAssemble_RelationFieldMissingFromProperties(t *testing.T) {
 
 func TestToStringSlice(t *testing.T) {
 	tests := []struct {
-		name    string
-		input   any
-		want    []string
-		wantOK  bool
+		name   string
+		input  any
+		want   []string
+		wantOK bool
 	}{
 		{
 			name:   "[]string",
@@ -1031,8 +1013,8 @@ func TestAssemble_OrphanEdge_MultiRelationTypePartialOrphan(t *testing.T) {
 			Properties: map[string]any{
 				"serial_number":  "SN001",
 				"hostname":       "router-01",
-				"interfaces":     []string{"iface:SN001_GE1/0/1"},  // 有效
-				"upstream_links": []string{"device:SN999"},         // 孤儿
+				"interfaces":     []string{"iface:SN001_GE1/0/1"}, // 有效
+				"upstream_links": []string{"device:SN999"},        // 孤儿
 			},
 		},
 		{
@@ -1276,8 +1258,8 @@ func TestAssemble_OrphanEdge_CrossEntityChain(t *testing.T) {
 			Properties: map[string]any{
 				"serial_number":  "SN001",
 				"hostname":       "router-01",
-				"interfaces":     []string{"iface:SN001_GE1/0/1"},  // 有效
-				"upstream_links": []string{"device:SN999"},          // 孤儿
+				"interfaces":     []string{"iface:SN001_GE1/0/1"}, // 有效
+				"upstream_links": []string{"device:SN999"},        // 孤儿
 			},
 		},
 		{

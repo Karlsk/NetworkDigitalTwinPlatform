@@ -9,8 +9,8 @@ package assembler
 // Labels 对应 EntityType 继承链（如 ["Resource", "Device"]），从基类到具体类，
 // URI 由 uriTemplate + stableKeys 生成，是节点在逻辑 DB 内的唯一标识。
 type Node struct {
-	Labels []string     // 节点标签列表，如 ["Resource", "Device"]
-	URI    string       // 唯一资源标识符
+	Labels []string       // 节点标签列表，如 ["Resource", "Device"]
+	URI    string         // 唯一资源标识符
 	Props  map[string]any // 节点属性
 }
 

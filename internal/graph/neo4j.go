@@ -198,7 +198,7 @@ func (c *neo4jClient) HasDB(ctx context.Context, db string) (bool, error) {
 
 // 确保 driverFactory 类型签名与 neo4j.NewDriverWithContext 一致。
 // 这是编译时类型安全的文档性注释。
-var _ func(string, auth.TokenManager, ...func(*neo4j.Config)) (neo4j.DriverWithContext, error) = driverFactory
+var _ func(string, auth.TokenManager, ...func(*neo4j.Config)) (neo4j.DriverWithContext, error) = driverFactory //nolint:staticcheck // neo4j.Config 将在 6.0 废弃
 
 // groupNodesByLabels 按 MostSpecificLabel 分组节点。
 // 用于 BulkCreate/Upsert 将相同最具体 Label 的节点合并到同一条 UNWIND Cypher 中。

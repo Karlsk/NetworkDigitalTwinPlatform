@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"gitlab.com/pml/network-digital-twin/internal/assembler"
+	"gitlab.com/pml/network-digital-twin/internal/repository"
 	"gopkg.in/yaml.v3"
 )
 
@@ -481,7 +482,7 @@ func TestSnapshotManager_Restore_LockAcquired(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		lock.Lock()
-		lock.Unlock()
+		lock.Unlock() //nolint:staticcheck // SA2001: 空临界区用于测试锁是否已释放
 		close(done)
 	}()
 	select {
@@ -516,7 +517,7 @@ func TestSnapshotManager_Restore_LockReleasedOnError(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		lock.Lock()
-		lock.Unlock()
+		lock.Unlock() //nolint:staticcheck // SA2001: 空临界区用于测试锁是否已释放
 		close(done)
 	}()
 	select {
@@ -2441,4 +2442,102 @@ func BenchmarkList_100Snapshots(b *testing.B) {
 			b.Fatalf("List() returned %d, want 100", len(metas))
 		}
 	}
+}
+
+// TestAnyToStringSlice 验证 anyToStringSlice 各分支。
+func TestAnyToStringSlice(t *testing.T) {
+	t.Run("nil", func(t *testing.T) {
+		if got := anyToStringSlice(nil); got != nil {
+			t.Errorf("anyToStringSlice(nil) = %v, want nil", got)
+		}
+	})
+	t.Run("string_slice", func(t *testing.T) {
+		got := anyToStringSlice([]string{"a", "b"})
+		if len(got) != 2 || got[0] != "a" || got[1] != "b" {
+			t.Errorf("anyToStringSlice([]string) = %v", got)
+		}
+	})
+	t.Run("any_slice", func(t *testing.T) {
+		got := anyToStringSlice([]any{"x", "y"})
+		if len(got) != 2 || got[0] != "x" {
+			t.Errorf("anyToStringSlice([]any) = %v", got)
+		}
+	})
+	t.Run("any_slice_mixed", func(t *testing.T) {
+		got := anyToStringSlice([]any{"x", 42, "y"})
+		if len(got) != 2 {
+			t.Errorf("anyToStringSlice(mixed) = %v, want 2 items", got)
+		}
+	})
+	t.Run("unsupported_type", func(t *testing.T) {
+		if got := anyToStringSlice(42); got != nil {
+			t.Errorf("anyToStringSlice(int) = %v, want nil", got)
+		}
+	})
+}
+
+// TestExtractProps 验证 extractProps 各分支。
+func TestExtractProps(t *testing.T) {
+	t.Run("nil", func(t *testing.T) {
+		if got := extractProps(nil); got != nil {
+			t.Errorf("extractProps(nil) = %v, want nil", got)
+		}
+	})
+	t.Run("map", func(t *testing.T) {
+		input := map[string]any{"key": "val"}
+		got := extractProps(input)
+		if got == nil || got["key"] != "val" {
+			t.Errorf("extractProps(map) = %v", got)
+		}
+	})
+	t.Run("unsupported", func(t *testing.T) {
+		if got := extractProps("not-a-map"); got != nil {
+			t.Errorf("extractProps(string) = %v, want nil", got)
+		}
+	})
+}
+
+// TestWithSnapshotRepositoryOption 验证 WithSnapshotRepository Option 注入。
+func TestWithSnapshotRepositoryOption(t *testing.T) {
+	gdb := &mockGraphDB{}
+	repo := repository.NewMemSnapshotRepository()
+	mgr := NewSnapshotManager(gdb, NewGraphLock(), t.TempDir(), 5, WithSnapshotRepository(repo))
+	if mgr.repo == nil {
+		t.Error("WithSnapshotRepository did not inject repo")
+	}
+}
+
+// TestWithAuditRepositoryOption 验证 WithAuditRepository Option 注入。
+func TestWithAuditRepositoryOption(t *testing.T) {
+	gdb := &mockGraphDB{}
+	auditRepo := repository.NewPGAuditLogRepository(nil)
+	mgr := NewSnapshotManager(gdb, NewGraphLock(), t.TempDir(), 5, WithAuditRepository(auditRepo))
+	if mgr.auditLog == nil {
+		t.Error("WithAuditRepository did not inject audit repo")
+	}
+}
+
+// TestYamlNodeItemImportGetLabels 验证 getLabels 各分支。
+func TestYamlNodeItemImportGetLabels(t *testing.T) {
+	t.Run("labels_priority", func(t *testing.T) {
+		item := yamlNodeItemImport{Labels: []string{"Device", "Router"}, Label: "OldLabel"}
+		got := item.getLabels()
+		if len(got) != 2 || got[0] != "Device" {
+			t.Errorf("getLabels() = %v, want [Device Router]", got)
+		}
+	})
+	t.Run("label_fallback", func(t *testing.T) {
+		item := yamlNodeItemImport{Label: "Fallback"}
+		got := item.getLabels()
+		if len(got) != 1 || got[0] != "Fallback" {
+			t.Errorf("getLabels() = %v, want [Fallback]", got)
+		}
+	})
+	t.Run("empty", func(t *testing.T) {
+		item := yamlNodeItemImport{}
+		got := item.getLabels()
+		if got != nil {
+			t.Errorf("getLabels() = %v, want nil", got)
+		}
+	})
 }

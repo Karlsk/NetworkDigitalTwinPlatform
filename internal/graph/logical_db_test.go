@@ -45,14 +45,14 @@ func (m *mockLogicalDB) CloneDB(_ context.Context, _, _ string) error { panic("n
 func (m *mockLogicalDB) ClearDB(_ context.Context, db string) error {
 	m.clearedDBs = append(m.clearedDBs, db)
 	if m.clearDBFn != nil {
-		return m.clearDBFn(context.Background(), db)
+		return m.clearDBFn(context.Background(), db) //nolint:contextcheck // 测试 mock 中使用新 context
 	}
 	return nil
 }
 
 func (m *mockLogicalDB) ListDBs(_ context.Context) ([]string, error) {
 	if m.listDBsFn != nil {
-		return m.listDBsFn(context.Background())
+		return m.listDBsFn(context.Background()) //nolint:contextcheck // 测试 mock 中使用新 context
 	}
 	return nil, nil
 }

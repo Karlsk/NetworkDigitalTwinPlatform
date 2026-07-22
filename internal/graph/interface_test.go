@@ -31,10 +31,10 @@ func (s *stubGraphDB) Query(_ context.Context, _ string, _ string, _ map[string]
 func (s *stubGraphDB) BuildCypher(_ string, _ string, _ []assembler.Node, _ []assembler.Relation, _ []string) (string, map[string]any) {
 	return "", nil
 }
-func (s *stubGraphDB) ClearDB(_ context.Context, _ string) error { return nil }
-func (s *stubGraphDB) CloneDB(_ context.Context, _, _ string) error { return nil }
-func (s *stubGraphDB) ListDBs(_ context.Context) ([]string, error) { return nil, nil }
-func (s *stubGraphDB) HasDB(_ context.Context, _ string) (bool, error) { return false, nil }
+func (s *stubGraphDB) ClearDB(_ context.Context, _ string) error         { return nil }
+func (s *stubGraphDB) CloneDB(_ context.Context, _, _ string) error      { return nil }
+func (s *stubGraphDB) ListDBs(_ context.Context) ([]string, error)       { return nil, nil }
+func (s *stubGraphDB) HasDB(_ context.Context, _ string) (bool, error)   { return false, nil }
 func (s *stubGraphDB) EnsureIndexes(_ context.Context, _ []string) error { return nil }
 
 // Compile-time check: stubGraphDB must satisfy GraphDB interface.

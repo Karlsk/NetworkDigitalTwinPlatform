@@ -16,12 +16,14 @@ import (
 // interface can be satisfied. Full implementation is deferred to I-01.
 type stubRegistry struct{}
 
-func (s *stubRegistry) Load(_ string) error                              { return nil }
-func (s *stubRegistry) GetEntityType(_ string) (*EntityType, error)      { return nil, ErrSchemaNotFound }
-func (s *stubRegistry) GetRelationType(_ string) (*RelationType, error)  { return nil, ErrSchemaNotFound }
-func (s *stubRegistry) ListEntityTypes() []*EntityType                   { return nil }
-func (s *stubRegistry) ListRelationTypes() []*RelationType               { return nil }
-func (s *stubRegistry) Validate(_ string, _ map[string]any) error        { return nil }
+func (s *stubRegistry) Load(_ string) error                         { return nil }
+func (s *stubRegistry) GetEntityType(_ string) (*EntityType, error) { return nil, ErrSchemaNotFound }
+func (s *stubRegistry) GetRelationType(_ string) (*RelationType, error) {
+	return nil, ErrSchemaNotFound
+}
+func (s *stubRegistry) ListEntityTypes() []*EntityType            { return nil }
+func (s *stubRegistry) ListRelationTypes() []*RelationType        { return nil }
+func (s *stubRegistry) Validate(_ string, _ map[string]any) error { return nil }
 func (s *stubRegistry) ApplyDefaults(_ string, props map[string]any) (map[string]any, error) {
 	return props, nil
 }
@@ -1117,8 +1119,8 @@ func TestGetLabels_UnknownEntity(t *testing.T) {
 func TestGetLabels_AllRealOntology(t *testing.T) {
 	r := loadTestOntology(t)
 	cases := []struct {
-		kind  string
-		want  []string
+		kind string
+		want []string
 	}{
 		{"Device", []string{"Resource", "Device"}},
 		{"Interface", []string{"Resource", "Interface"}},

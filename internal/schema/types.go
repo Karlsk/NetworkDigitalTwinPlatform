@@ -15,13 +15,13 @@ type EntityType struct {
 
 // EntityTypeSpec 是 EntityType 的详细规格。
 type EntityTypeSpec struct {
-	Extends        string                          `yaml:"extends"`        // 父类型名称（可空，空字符串表示无继承）
-	Identity       IdentitySpec                    `yaml:"identity"`       // 不可变身份标识
-	URITemplate    string                          `yaml:"uriTemplate"`    // URI 模板，引用 stableKeys 中的字段
-	FieldMapping   map[string]string               `yaml:"fieldMapping"`   // 遗留字段名 → 规范字段名映射
-	Normalize      []NormalizeRule                 `yaml:"normalize"`      // 字段级字符串转换规则
-	RelationFields map[string]RelationFieldSpec    `yaml:"relationFields"` // 推导关系的属性字段
-	Properties     map[string]PropertySpec         `yaml:"properties"`     // 属性定义
+	Extends        string                       `yaml:"extends"`        // 父类型名称（可空，空字符串表示无继承）
+	Identity       IdentitySpec                 `yaml:"identity"`       // 不可变身份标识
+	URITemplate    string                       `yaml:"uriTemplate"`    // URI 模板，引用 stableKeys 中的字段
+	FieldMapping   map[string]string            `yaml:"fieldMapping"`   // 遗留字段名 → 规范字段名映射
+	Normalize      []NormalizeRule              `yaml:"normalize"`      // 字段级字符串转换规则
+	RelationFields map[string]RelationFieldSpec `yaml:"relationFields"` // 推导关系的属性字段
+	Properties     map[string]PropertySpec      `yaml:"properties"`     // 属性定义
 }
 
 // IdentitySpec 定义实体的不可变身份标识。

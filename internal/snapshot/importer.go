@@ -14,9 +14,9 @@ import (
 // 新格式: labels: ["Resource", "Device"]
 // 旧格式: label: Device（向后兼容）
 type yamlNodeItemImport struct {
-	Label  string   `yaml:"label"`  // 旧格式，兼容读取
-	Labels []string `yaml:"labels"` // 新格式
-	URI    string   `yaml:"uri"`
+	Label  string         `yaml:"label"`  // 旧格式，兼容读取
+	Labels []string       `yaml:"labels"` // 新格式
+	URI    string         `yaml:"uri"`
 	Props  map[string]any `yaml:"props,omitempty"`
 }
 
@@ -33,8 +33,8 @@ func (item yamlNodeItemImport) getLabels() []string {
 
 // yamlNodesDocImport 节点文档（导入用，同时支持新旧格式）。
 type yamlNodesDocImport struct {
-	Kind  string                 `yaml:"kind"`
-	Items []yamlNodeItemImport   `yaml:"items"`
+	Kind  string               `yaml:"kind"`
+	Items []yamlNodeItemImport `yaml:"items"`
 }
 
 // importMetaOnly 只解码第一个 YAML 文档（meta），不解码 nodes/rels。

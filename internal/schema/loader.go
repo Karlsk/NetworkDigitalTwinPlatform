@@ -2,6 +2,7 @@ package schema
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -84,7 +85,7 @@ func loadFileExpanded(path string) ([]EntityType, []RelationType, error) {
 	for {
 		var node yaml.Node
 		if err := decoder.Decode(&node); err != nil {
-			if err == io.EOF {
+			if errors.Is(err, io.EOF) {
 				break
 			}
 			return nil, nil, fmt.Errorf("decode document: %w", ErrInvalidSchema)

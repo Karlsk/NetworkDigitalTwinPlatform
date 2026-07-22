@@ -20,8 +20,8 @@ type yamlMetaDoc struct {
 }
 
 type yamlNodeItem struct {
-	Labels []string     `yaml:"labels"`
-	URI    string       `yaml:"uri"`
+	Labels []string       `yaml:"labels"`
+	URI    string         `yaml:"uri"`
 	Props  map[string]any `yaml:"props,omitempty"`
 }
 
