@@ -42,6 +42,15 @@ type snapshotItem struct {
 }
 
 // ListSnapshots 列出所有快照。
+//
+// @Summary 列出所有快照
+// @Description 返回当前所有快照元数据
+// @Tags snapshot
+// @Produce json
+// @Success 200 {object} response.Response
+// @Failure 500 {object} response.Response
+// @Router /api/v1/snapshot [get]
+//
 // GET /api/v1/snapshot
 func (h *SnapshotHandler) ListSnapshots(c *gin.Context) {
 	metas, err := h.svc.List(c.Request.Context())
@@ -68,6 +77,17 @@ type CreateSnapshotRequest struct {
 }
 
 // CreateSnapshot 创建快照。
+//
+// @Summary 创建快照
+// @Description 创建新的图快照
+// @Tags snapshot
+// @Accept json
+// @Produce json
+// @Success 201 {object} response.Response
+// @Failure 400 {object} response.Response
+// @Failure 500 {object} response.Response
+// @Router /api/v1/snapshot [post]
+//
 // POST /api/v1/snapshot
 func (h *SnapshotHandler) CreateSnapshot(c *gin.Context) {
 	var req CreateSnapshotRequest
@@ -90,6 +110,16 @@ func (h *SnapshotHandler) CreateSnapshot(c *gin.Context) {
 }
 
 // DeleteSnapshot 删除快照。
+//
+// @Summary 删除快照
+// @Description 根据名称删除指定快照
+// @Tags snapshot
+// @Produce json
+// @Param name path string true "snapshot name"
+// @Success 200 {object} response.Response
+// @Failure 500 {object} response.Response
+// @Router /api/v1/snapshot/{name} [delete]
+//
 // DELETE /api/v1/snapshot/:name
 func (h *SnapshotHandler) DeleteSnapshot(c *gin.Context) {
 	name := c.Param("name")
@@ -106,6 +136,17 @@ type RestoreSnapshotRequest struct {
 }
 
 // RestoreSnapshot 恢复快照。
+//
+// @Summary 恢复快照
+// @Description 根据名称恢复指定快照
+// @Tags snapshot
+// @Accept json
+// @Produce json
+// @Success 200 {object} response.Response
+// @Failure 400 {object} response.Response
+// @Failure 500 {object} response.Response
+// @Router /api/v1/snapshot/restore [post]
+//
 // POST /api/v1/snapshot/restore
 func (h *SnapshotHandler) RestoreSnapshot(c *gin.Context) {
 	var req RestoreSnapshotRequest
@@ -122,6 +163,18 @@ func (h *SnapshotHandler) RestoreSnapshot(c *gin.Context) {
 }
 
 // DiffSnapshots 对比两个快照。
+//
+// @Summary 对比快照
+// @Description 对比两个快照之间的差异
+// @Tags snapshot
+// @Produce json
+// @Param a query string true "snapshot A name"
+// @Param b query string true "snapshot B name"
+// @Success 200 {object} response.Response
+// @Failure 400 {object} response.Response
+// @Failure 500 {object} response.Response
+// @Router /api/v1/snapshot/diff [get]
+//
 // GET /api/v1/snapshot/diff?a=snap1&b=snap2
 func (h *SnapshotHandler) DiffSnapshots(c *gin.Context) {
 	a, b := c.Query("a"), c.Query("b")
@@ -148,6 +201,17 @@ func (h *SnapshotHandler) DiffSnapshots(c *gin.Context) {
 }
 
 // QueryAudit 查询审计日志。
+//
+// @Summary 查询审计日志
+// @Description 查询快照操作审计日志
+// @Tags audit
+// @Produce json
+// @Param limit query int false "max items"
+// @Param action query string false "action filter"
+// @Param snapshot query string false "snapshot filter"
+// @Success 200 {object} response.Response
+// @Router /api/v1/audit [get]
+//
 // GET /api/v1/audit?limit=50&action=create&snapshot=snap1
 func (h *SnapshotHandler) QueryAudit(c *gin.Context) {
 	limitStr := c.DefaultQuery("limit", "50")

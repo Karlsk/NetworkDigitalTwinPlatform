@@ -1,15 +1,22 @@
 package middleware
 
 import (
+	"bytes"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"gitlab.com/pml/network-digital-twin/internal/observability"
 )
 
 func init() {
@@ -273,4 +280,246 @@ func TestRateLimit_RecoversAfterWait(t *testing.T) {
 	w = httptest.NewRecorder()
 	engine.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+// --- CORS 中间件测试 ---
+
+func TestCORS_PreflightRequest(t *testing.T) {
+	engine := gin.New()
+	engine.Use(CORS())
+	engine.GET("/test", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
+
+	req := httptest.NewRequest(http.MethodOptions, "/test", nil)
+	w := httptest.NewRecorder()
+	engine.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusNoContent, w.Code)
+	assert.Equal(t, "*", w.Header().Get("Access-Control-Allow-Origin"))
+	assert.Contains(t, w.Header().Get("Access-Control-Allow-Methods"), "GET")
+	assert.Contains(t, w.Header().Get("Access-Control-Allow-Methods"), "POST")
+	assert.Contains(t, w.Header().Get("Access-Control-Allow-Headers"), "X-Request-ID")
+	assert.Equal(t, "X-Request-ID", w.Header().Get("Access-Control-Expose-Headers"))
+	assert.Equal(t, "86400", w.Header().Get("Access-Control-Max-Age"))
+}
+
+func TestCORS_NormalRequest(t *testing.T) {
+	engine := gin.New()
+	engine.Use(CORS())
+	engine.GET("/test", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	w := httptest.NewRecorder()
+	engine.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "*", w.Header().Get("Access-Control-Allow-Origin"))
+}
+
+// --- RequestID 中间件测试 ---
+
+func TestRequestID_Generated(t *testing.T) {
+	engine := gin.New()
+	engine.Use(RequestID())
+	engine.GET("/test", func(c *gin.Context) {
+		rid, _ := c.Get("request_id")
+		c.JSON(http.StatusOK, gin.H{"rid": rid})
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	w := httptest.NewRecorder()
+	engine.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	// Header 应包含 X-Request-ID
+	assert.NotEmpty(t, w.Header().Get("X-Request-ID"))
+	// Context 中的 request_id 应与 Header 一致
+	var body map[string]any
+	err := json.Unmarshal(w.Body.Bytes(), &body)
+	require.NoError(t, err)
+	assert.Equal(t, w.Header().Get("X-Request-ID"), body["rid"])
+	// UUID 格式：包含 4 个 '-' 分隔
+	rid := w.Header().Get("X-Request-ID")
+	assert.Len(t, strings.Split(rid, "-"), 5)
+}
+
+func TestRequestID_Passthrough(t *testing.T) {
+	engine := gin.New()
+	engine.Use(RequestID())
+	engine.GET("/test", func(c *gin.Context) {
+		rid, _ := c.Get("request_id")
+		c.JSON(http.StatusOK, gin.H{"rid": rid})
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	req.Header.Set("X-Request-ID", "my-custom-id-123")
+	w := httptest.NewRecorder()
+	engine.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "my-custom-id-123", w.Header().Get("X-Request-ID"))
+	var body map[string]any
+	err := json.Unmarshal(w.Body.Bytes(), &body)
+	require.NoError(t, err)
+	assert.Equal(t, "my-custom-id-123", body["rid"])
+}
+
+// --- Logger 中间件测试 ---
+
+func TestLogger_Output(t *testing.T) {
+	var buf bytes.Buffer
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+
+	engine := gin.New()
+	engine.Use(RequestID())
+	engine.Use(Logger())
+	engine.GET("/test", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/test?q=1", nil)
+	w := httptest.NewRecorder()
+	engine.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	logOutput := buf.String()
+	assert.Contains(t, logOutput, "method=GET")
+	assert.Contains(t, logOutput, "path=/test")
+	assert.Contains(t, logOutput, "status=200")
+	assert.Contains(t, logOutput, "duration_ms=")
+	assert.Contains(t, logOutput, "request_id=")
+}
+
+func TestLogger_LevelRouting(t *testing.T) {
+	tests := []struct {
+		name     string
+		status   int
+		contains string
+	}{
+		{"200_Info", http.StatusOK, "INFO"},
+		{"404_Warn", http.StatusNotFound, "WARN"},
+		{"500_Error", http.StatusInternalServerError, "ERROR"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+
+			engine := gin.New()
+			engine.Use(Logger())
+			engine.GET("/test", func(c *gin.Context) {
+				c.Status(tt.status)
+			})
+
+			req := httptest.NewRequest(http.MethodGet, "/test", nil)
+			w := httptest.NewRecorder()
+			engine.ServeHTTP(w, req)
+
+			assert.Equal(t, tt.status, w.Code)
+			assert.Contains(t, buf.String(), "level="+tt.contains)
+		})
+	}
+}
+
+// --- 中间件顺序测试 ---
+
+func TestMiddlewareOrder(t *testing.T) {
+	var buf bytes.Buffer
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+
+	engine := gin.New()
+	engine.Use(gin.Recovery())
+	engine.Use(CORS())
+	engine.Use(RequestID())
+	engine.Use(Logger())
+	engine.GET("/test", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	w := httptest.NewRecorder()
+	engine.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	// CORS header 应存在
+	assert.Equal(t, "*", w.Header().Get("Access-Control-Allow-Origin"))
+	// RequestID header 应存在
+	assert.NotEmpty(t, w.Header().Get("X-Request-ID"))
+	// Logger 应输出
+	assert.Contains(t, buf.String(), "HTTP request")
+}
+
+// --- Metrics 中间件测试 ---
+
+// getCounterVecValue 从 HTTPRequestsTotal CounterVec 获取指定标签的当前值。
+func getCounterVecValue(_ string, labels ...string) float64 {
+	m := &dto.Metric{}
+	if err := observability.HTTPRequestsTotal.WithLabelValues(labels...).Write(m); err != nil {
+		return 0
+	}
+	return m.GetCounter().GetValue()
+}
+
+func TestMetricsMiddleware_CounterIncrement(t *testing.T) {
+	engine := gin.New()
+	engine.Use(Metrics())
+	engine.GET("/test", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
+
+	// 记录请求前的值
+	before := getCounterVecValue("ndt_http_requests_total", "GET", "/test", "200")
+
+	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	w := httptest.NewRecorder()
+	engine.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	after := getCounterVecValue("ndt_http_requests_total", "GET", "/test", "200")
+	assert.Equal(t, before+1, after, "counter should increment by 1")
+}
+
+func TestMetricsMiddleware_DurationObserved(t *testing.T) {
+	engine := gin.New()
+	engine.Use(Metrics())
+	engine.GET("/test", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
+
+	// 记录请求前的 histogram count
+	m := &dto.Metric{}
+	observer := observability.HTTPRequestDuration.WithLabelValues("GET", "/test").(prometheus.Histogram)
+	observer.Write(m)
+	beforeCount := m.GetHistogram().GetSampleCount()
+
+	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	w := httptest.NewRecorder()
+	engine.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	m2 := &dto.Metric{}
+	observer2 := observability.HTTPRequestDuration.WithLabelValues("GET", "/test").(prometheus.Histogram)
+	observer2.Write(m2)
+	afterCount := m2.GetHistogram().GetSampleCount()
+
+	assert.Equal(t, beforeCount+1, afterCount, "histogram sample count should increment")
+}
+
+func TestMetricsMiddleware_UnknownPath(t *testing.T) {
+	engine := gin.New()
+	engine.Use(Metrics())
+	// 不注册任何路由，FullPath() 将返回空字符串
+
+	before := getCounterVecValue("ndt_http_requests_total", "GET", "unknown", "404")
+
+	req := httptest.NewRequest(http.MethodGet, "/nonexistent", nil)
+	w := httptest.NewRecorder()
+	engine.ServeHTTP(w, req)
+
+	after := getCounterVecValue("ndt_http_requests_total", "GET", "unknown", "404")
+	assert.Equal(t, before+1, after, "unknown path should use 'unknown' label")
 }

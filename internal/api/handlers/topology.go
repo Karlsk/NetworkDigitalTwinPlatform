@@ -28,6 +28,17 @@ func NewTopologyHandler(a analysisService, d deviceQueryService) *TopologyHandle
 }
 
 // QueryTopology 查询图数据库拓扑。
+//
+// @Summary 查询图拓扑
+// @Description 从 Neo4j 查询图数据库拓扑数据
+// @Tags topology
+// @Produce json
+// @Param label query string false "entity label"
+// @Param limit query int false "max items"
+// @Success 200 {object} response.Response
+// @Failure 500 {object} response.Response
+// @Router /api/v1/topology [get]
+//
 // GET /api/v1/topology?label=Device&limit=100
 func (h *TopologyHandler) QueryTopology(c *gin.Context) {
 	label := c.DefaultQuery("label", "Device")
@@ -50,6 +61,17 @@ func (h *TopologyHandler) QueryTopology(c *gin.Context) {
 }
 
 // QueryTopologyLive 查询实时拓扑（直连控制器，不经过 Neo4j）。
+//
+// @Summary 查询实时拓扑
+// @Description 直连控制器获取实时拓扑数据
+// @Tags topology
+// @Produce json
+// @Param connector query string true "connector name"
+// @Success 200 {object} response.Response
+// @Failure 400 {object} response.Response
+// @Failure 500 {object} response.Response
+// @Router /api/v1/topology/live [get]
+//
 // GET /api/v1/topology/live?connector=controller-1
 func (h *TopologyHandler) QueryTopologyLive(c *gin.Context) {
 	connectorName := c.Query("connector")

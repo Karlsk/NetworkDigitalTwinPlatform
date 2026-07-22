@@ -16,6 +16,14 @@ type HealthResponse struct {
 }
 
 // Health 健康检查 handler。
+//
+// @Summary 健康检查
+// @Description 返回服务健康状态、时间戳和版本号
+// @Tags health
+// @Produce json
+// @Success 200 {object} HealthResponse
+// @Router /health [get]
+//
 // GET /health
 func Health(c *gin.Context) {
 	c.JSON(http.StatusOK, HealthResponse{

@@ -1,0 +1,484 @@
+basePath: /api/v1
+definitions:
+  handlers.HealthResponse:
+    properties:
+      status:
+        type: string
+      timestamp:
+        type: string
+      version:
+        type: string
+    type: object
+  handlers.SyncResponse:
+    properties:
+      duration:
+        type: string
+      nodes_created:
+        type: integer
+      orphan_edges_skipped:
+        type: integer
+      relations_created:
+        type: integer
+    type: object
+  response.ErrorCode:
+    enum:
+    - 0
+    - 400001
+    - 401001
+    - 404001
+    - 429001
+    - 500001
+    - 501001
+    - 503001
+    - 400011
+    - 503011
+    - 400021
+    - 404021
+    - 400031
+    - 500031
+    - 400041
+    - 404041
+    - 501041
+    - 400051
+    - 404051
+    - 501051
+    type: integer
+    x-enum-comments:
+      CodeBadRequest: 请求参数错误
+      CodeCircuitBreakOpen: 服务不可用（熔断）
+      CodeDeviceBadRequest: 设备请求参数错误
+      CodeDeviceNotFound: Connector 未找到
+      CodeDeviceUnsupported: 设备操作不支持
+      CodeInternalError: 服务内部错误
+      CodeMonitorBadRequest: 监控请求参数错误
+      CodeMonitorNotFound: 监控 Connector 未找到
+      CodeMonitorUnsupported: 监控操作不支持
+      CodeNotFound: 资源未找到
+      CodeNotImplemented: 功能未实现
+      CodeRateLimitExceed: 请求限流
+      CodeSnapshotBadRequest: 快照请求参数错误
+      CodeSnapshotNotFound: 快照未找到
+      CodeSuccess: 成功
+      CodeSyncQueueFull: Webhook 队列满
+      CodeSyncUnsupportedAction: 不支持的同步动作
+      CodeTopologyBadRequest: 拓扑请求参数错误
+      CodeTopologyQueryFailed: 拓扑查询失败
+      CodeUnauthorized: 未认证
+    x-enum-descriptions:
+    - 成功
+    - 请求参数错误
+    - 未认证
+    - 资源未找到
+    - 请求限流
+    - 服务内部错误
+    - 功能未实现
+    - 服务不可用（熔断）
+    - 不支持的同步动作
+    - Webhook 队列满
+    - 快照请求参数错误
+    - 快照未找到
+    - 拓扑请求参数错误
+    - 拓扑查询失败
+    - 设备请求参数错误
+    - Connector 未找到
+    - 设备操作不支持
+    - 监控请求参数错误
+    - 监控 Connector 未找到
+    - 监控操作不支持
+    x-enum-varnames:
+    - CodeSuccess
+    - CodeBadRequest
+    - CodeUnauthorized
+    - CodeNotFound
+    - CodeRateLimitExceed
+    - CodeInternalError
+    - CodeNotImplemented
+    - CodeCircuitBreakOpen
+    - CodeSyncUnsupportedAction
+    - CodeSyncQueueFull
+    - CodeSnapshotBadRequest
+    - CodeSnapshotNotFound
+    - CodeTopologyBadRequest
+    - CodeTopologyQueryFailed
+    - CodeDeviceBadRequest
+    - CodeDeviceNotFound
+    - CodeDeviceUnsupported
+    - CodeMonitorBadRequest
+    - CodeMonitorNotFound
+    - CodeMonitorUnsupported
+  response.Response:
+    properties:
+      code:
+        allOf:
+        - $ref: '#/definitions/response.ErrorCode'
+        description: 业务错误码，0 = 成功
+      data: {}
+      message:
+        description: 人类可读描述
+        type: string
+    type: object
+host: localhost:8080
+info:
+  contact: {}
+  description: 网络数字孪生平台 REST API 文档。
+  title: Network Digital Twin API
+  version: 2.0.0
+paths:
+  /api/v1/audit:
+    get:
+      description: 查询快照操作审计日志
+      parameters:
+      - description: max items
+        in: query
+        name: limit
+        type: integer
+      - description: action filter
+        in: query
+        name: action
+        type: string
+      - description: snapshot filter
+        in: query
+        name: snapshot
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/response.Response'
+      summary: 查询审计日志
+      tags:
+      - audit
+  /api/v1/device/{connector}/{query_type}:
+    get:
+      description: 根据连接器和查询类型查询设备信息
+      parameters:
+      - description: connector name
+        in: path
+        name: connector
+        required: true
+        type: string
+      - description: query type
+        in: path
+        name: query_type
+        required: true
+        type: string
+      - description: device name
+        in: query
+        name: device
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/response.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/response.Response'
+        "501":
+          description: Not Implemented
+          schema:
+            $ref: '#/definitions/response.Response'
+      summary: 查询设备信息
+      tags:
+      - device
+  /api/v1/monitor/{connector}/{query_type}:
+    get:
+      description: 根据连接器和查询类型查询监控数据
+      parameters:
+      - description: connector name
+        in: path
+        name: connector
+        required: true
+        type: string
+      - description: query type
+        in: path
+        name: query_type
+        required: true
+        type: string
+      - description: device name
+        in: query
+        name: device
+        type: string
+      - description: port name
+        in: query
+        name: port
+        type: string
+      - description: metrics list
+        in: query
+        name: metrics
+        type: string
+      - description: start time
+        in: query
+        name: start_time
+        type: string
+      - description: end time
+        in: query
+        name: end_time
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/response.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/response.Response'
+        "501":
+          description: Not Implemented
+          schema:
+            $ref: '#/definitions/response.Response'
+      summary: 查询监控数据
+      tags:
+      - monitor
+  /api/v1/snapshot:
+    get:
+      description: 返回当前所有快照元数据
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/response.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/response.Response'
+      summary: 列出所有快照
+      tags:
+      - snapshot
+    post:
+      consumes:
+      - application/json
+      description: 创建新的图快照
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/response.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/response.Response'
+      summary: 创建快照
+      tags:
+      - snapshot
+  /api/v1/snapshot/{name}:
+    delete:
+      description: 根据名称删除指定快照
+      parameters:
+      - description: snapshot name
+        in: path
+        name: name
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/response.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/response.Response'
+      summary: 删除快照
+      tags:
+      - snapshot
+  /api/v1/snapshot/diff:
+    get:
+      description: 对比两个快照之间的差异
+      parameters:
+      - description: snapshot A name
+        in: query
+        name: a
+        required: true
+        type: string
+      - description: snapshot B name
+        in: query
+        name: b
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/response.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/response.Response'
+      summary: 对比快照
+      tags:
+      - snapshot
+  /api/v1/snapshot/restore:
+    post:
+      consumes:
+      - application/json
+      description: 根据名称恢复指定快照
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/response.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/response.Response'
+      summary: 恢复快照
+      tags:
+      - snapshot
+  /api/v1/sync:
+    post:
+      consumes:
+      - application/json
+      description: 从所有 Connector 全量拉取数据并写入 Neo4j
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.SyncResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/response.Response'
+      summary: 触发全量同步
+      tags:
+      - sync
+  /api/v1/sync/webhook:
+    post:
+      consumes:
+      - application/json
+      description: 接收 Webhook 增量事件，写入事件队列
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Accepted
+          schema:
+            $ref: '#/definitions/response.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.Response'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/response.Response'
+      summary: 接收增量事件
+      tags:
+      - sync
+  /api/v1/topology:
+    get:
+      description: 从 Neo4j 查询图数据库拓扑数据
+      parameters:
+      - description: entity label
+        in: query
+        name: label
+        type: string
+      - description: max items
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/response.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/response.Response'
+      summary: 查询图拓扑
+      tags:
+      - topology
+  /api/v1/topology/live:
+    get:
+      description: 直连控制器获取实时拓扑数据
+      parameters:
+      - description: connector name
+        in: query
+        name: connector
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/response.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/response.Response'
+      summary: 查询实时拓扑
+      tags:
+      - topology
+  /health:
+    get:
+      description: 返回服务健康状态、时间戳和版本号
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.HealthResponse'
+      summary: 健康检查
+      tags:
+      - health
+schemes:
+- http
+swagger: "2.0"

@@ -31,6 +31,20 @@ func NewDeviceHandler(svc deviceQueryService) *DeviceHandler {
 }
 
 // QueryDeviceInfo 查询设备信息。
+//
+// @Summary 查询设备信息
+// @Description 根据连接器和查询类型查询设备信息
+// @Tags device
+// @Produce json
+// @Param connector path string true "connector name"
+// @Param query_type path string true "query type"
+// @Param device query string false "device name"
+// @Success 200 {object} response.Response
+// @Failure 404 {object} response.Response
+// @Failure 501 {object} response.Response
+// @Failure 500 {object} response.Response
+// @Router /api/v1/device/{connector}/{query_type} [get]
+//
 // GET /api/v1/device/:connector/:query_type?device=xxx
 func (h *DeviceHandler) QueryDeviceInfo(c *gin.Context) {
 	connectorName := c.Param("connector")
@@ -51,6 +65,25 @@ func (h *DeviceHandler) QueryDeviceInfo(c *gin.Context) {
 }
 
 // QueryMonitor 查询监控数据。
+//
+// @Summary 查询监控数据
+// @Description 根据连接器和查询类型查询监控数据
+// @Tags monitor
+// @Produce json
+// @Param connector path string true "connector name"
+// @Param query_type path string true "query type"
+// @Param device query string false "device name"
+// @Param port query string false "port name"
+// @Param metrics query string false "metrics list"
+// @Param start_time query string false "start time"
+// @Param end_time query string false "end time"
+// @Success 200 {object} response.Response
+// @Failure 400 {object} response.Response
+// @Failure 404 {object} response.Response
+// @Failure 501 {object} response.Response
+// @Failure 500 {object} response.Response
+// @Router /api/v1/monitor/{connector}/{query_type} [get]
+//
 // GET /api/v1/monitor/:connector/:query_type?device=xxx&port=xxx&metrics=cpu,memory
 func (h *DeviceHandler) QueryMonitor(c *gin.Context) {
 	connectorName := c.Param("connector")

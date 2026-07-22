@@ -41,6 +41,17 @@ type SyncResponse struct {
 }
 
 // FullSync 触发全量同步。
+//
+// @Summary 触发全量同步
+// @Description 从所有 Connector 全量拉取数据并写入 Neo4j
+// @Tags sync
+// @Accept json
+// @Produce json
+// @Success 200 {object} SyncResponse
+// @Failure 400 {object} response.Response
+// @Failure 500 {object} response.Response
+// @Router /api/v1/sync [post]
+//
 // POST /api/v1/sync
 func (h *SyncHandler) FullSync(c *gin.Context) {
 	var req SyncRequest
@@ -81,6 +92,17 @@ type WebhookRequest struct {
 }
 
 // Webhook 接收 Webhook 增量事件。
+//
+// @Summary 接收增量事件
+// @Description 接收 Webhook 增量事件，写入事件队列
+// @Tags sync
+// @Accept json
+// @Produce json
+// @Success 202 {object} response.Response
+// @Failure 400 {object} response.Response
+// @Failure 503 {object} response.Response
+// @Router /api/v1/sync/webhook [post]
+//
 // POST /api/v1/sync/webhook
 func (h *SyncHandler) Webhook(c *gin.Context) {
 	var req WebhookRequest

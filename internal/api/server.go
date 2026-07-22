@@ -10,6 +10,9 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+	swaggerFiles "github.com/swaggo/files"
+	ginSwagger "github.com/swaggo/gin-swagger"
 
 	"gitlab.com/pml/network-digital-twin/internal/api/handlers"
 	"gitlab.com/pml/network-digital-twin/internal/api/middleware"
@@ -29,9 +32,26 @@ func NewServer() *Server {
 		gin.SetMode(gin.ReleaseMode)
 	}
 	engine := gin.New()
-	engine.Use(gin.Recovery())
-	engine.Use(middleware.RateLimit(100, 200))
-	engine.Use(middleware.CircuitBreaker(5, 30*time.Second))
+
+	// 全局中间件链：Recovery → CORS → RequestID → Logger → Metrics → RateLimit → CircuitBreaker
+	engine.Use(
+		gin.Recovery(),                               // panic 恢复
+		middleware.CORS(),                            // 跨域
+		middleware.RequestID(),                       // 请求 ID
+		middleware.Logger(),                          // 请求日志
+		middleware.Metrics(),                         // Prometheus 指标
+		middleware.RateLimit(100, 200),               // 限流
+		middleware.CircuitBreaker(5, 30*time.Second), // 熔断
+	)
+
+	// /metrics 端点（Prometheus 抓取）
+	engine.GET("/metrics", gin.WrapH(promhttp.Handler()))
+
+	// Swagger UI 路由（通过环境变量 SWAGGER_ENABLED=false 关闭）
+	if os.Getenv("SWAGGER_ENABLED") != "false" {
+		engine.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
+		slog.Info("swagger UI enabled", "path", "/swagger/index.html")
+	}
 
 	v1 := engine.Group("/api/v1")
 	return &Server{engine: engine, router: v1}
@@ -111,9 +131,9 @@ func (s *Server) Run(ctx context.Context, addr string) error {
 	select {
 	case <-ctx.Done():
 		slog.Info("HTTP API server shutting down")
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second) //nolint:contextcheck // 新 context 用于 shutdown，不应继承已取消的父 context
 		defer cancel()
-		return srv.Shutdown(shutdownCtx)
+		return srv.Shutdown(shutdownCtx) //nolint:contextcheck // shutdownCtx 是新 context，不继承已取消的父 context
 	case err := <-errCh:
 		return err
 	}

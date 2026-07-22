@@ -356,3 +356,82 @@ func TestCircuitBreaker(t *testing.T) {
 	engine2.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusOK, w.Code)
 }
+
+// --- CORS 和 RequestID 集成测试 ---
+
+func TestServerCORSHeaders(t *testing.T) {
+	srv := NewServer()
+	srv.engine.GET("/health", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	})
+
+	// 普通 GET 请求应包含 CORS Headers
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	w := httptest.NewRecorder()
+	srv.engine.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "*", w.Header().Get("Access-Control-Allow-Origin"))
+
+	// OPTIONS 预检请求应返回 204
+	req = httptest.NewRequest(http.MethodOptions, "/health", nil)
+	w = httptest.NewRecorder()
+	srv.engine.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusNoContent, w.Code)
+	assert.Equal(t, "*", w.Header().Get("Access-Control-Allow-Origin"))
+}
+
+func TestServerRequestIDHeader(t *testing.T) {
+	srv := NewServer()
+	srv.engine.GET("/health", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	})
+
+	// 未传 X-Request-ID 时应自动生成
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	w := httptest.NewRecorder()
+	srv.engine.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.NotEmpty(t, w.Header().Get("X-Request-ID"))
+
+	// 已传 X-Request-ID 时应透传
+	req = httptest.NewRequest(http.MethodGet, "/health", nil)
+	req.Header.Set("X-Request-ID", "test-id-456")
+	w = httptest.NewRecorder()
+	srv.engine.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "test-id-456", w.Header().Get("X-Request-ID"))
+}
+
+func TestSwaggerDisabled(t *testing.T) {
+	t.Setenv("SWAGGER_ENABLED", "false")
+	srv := NewServer()
+	srv.engine.GET("/health", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	})
+
+	// Swagger 应不注册
+	req := httptest.NewRequest(http.MethodGet, "/swagger/index.html", nil)
+	w := httptest.NewRecorder()
+	srv.engine.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusNotFound, w.Code)
+}
+
+// --- Metrics 端点集成测试 ---
+
+func TestMetricsEndpoint(t *testing.T) {
+	srv := NewServer()
+	srv.engine.GET("/health", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	})
+
+	// GET /metrics 应返回 200 + Prometheus 格式文本
+	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	w := httptest.NewRecorder()
+	srv.engine.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	body := w.Body.String()
+	assert.Contains(t, body, "ndt_", "metrics output should contain ndt_ prefix")
+	assert.Contains(t, w.Header().Get("Content-Type"), "text/plain",
+		"metrics endpoint should return text/plain content type")
+}

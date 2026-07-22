@@ -21,12 +21,12 @@ import (
 // ── mock deviceQueryService ──
 
 type mockDeviceQueryService struct {
-	deviceResult any
-	deviceErr    error
+	deviceResult  any
+	deviceErr     error
 	lastDeviceReq service.DeviceInfoRequest
 
-	monitorResult any
-	monitorErr    error
+	monitorResult  any
+	monitorErr     error
 	lastMonitorReq service.MonitorRequest
 }
 
@@ -54,9 +54,9 @@ func newDeviceTestRouter(svc *mockDeviceQueryService) *gin.Engine {
 
 func TestQueryDeviceInfo_Success(t *testing.T) {
 	configData := map[string]any{
-		"hostname":   "R1",
-		"mgmt_ip":    "10.0.0.1",
-		"vendor":     "Huawei",
+		"hostname": "R1",
+		"mgmt_ip":  "10.0.0.1",
+		"vendor":   "Huawei",
 	}
 	mock := &mockDeviceQueryService{deviceResult: configData}
 	engine := newDeviceTestRouter(mock)

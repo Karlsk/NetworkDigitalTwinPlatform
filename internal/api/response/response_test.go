@@ -114,6 +114,84 @@ func TestNotImplemented(t *testing.T) {
 	assert.Equal(t, "coming soon", body.Message)
 }
 
+func TestCreated(t *testing.T) {
+	engine := gin.New()
+	engine.POST("/test", func(c *gin.Context) {
+		Created(c, gin.H{"id": "123"})
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/test", nil)
+	w := httptest.NewRecorder()
+	engine.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusCreated, w.Code)
+
+	var body Response
+	err := json.Unmarshal(w.Body.Bytes(), &body)
+	require.NoError(t, err)
+	assert.Equal(t, CodeSuccess, body.Code)
+	assert.Equal(t, "created", body.Message)
+	assert.NotNil(t, body.Data)
+}
+
+func TestCreated_NilData(t *testing.T) {
+	engine := gin.New()
+	engine.POST("/test", func(c *gin.Context) {
+		Created(c, nil)
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/test", nil)
+	w := httptest.NewRecorder()
+	engine.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusCreated, w.Code)
+
+	var raw map[string]any
+	err := json.Unmarshal(w.Body.Bytes(), &raw)
+	require.NoError(t, err)
+	_, hasData := raw["data"]
+	assert.False(t, hasData, "nil data should be omitted via omitempty")
+}
+
+func TestAccepted(t *testing.T) {
+	engine := gin.New()
+	engine.POST("/test", func(c *gin.Context) {
+		Accepted(c, gin.H{"task_id": "abc"})
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/test", nil)
+	w := httptest.NewRecorder()
+	engine.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusAccepted, w.Code)
+
+	var body Response
+	err := json.Unmarshal(w.Body.Bytes(), &body)
+	require.NoError(t, err)
+	assert.Equal(t, CodeSuccess, body.Code)
+	assert.Equal(t, "accepted", body.Message)
+	assert.NotNil(t, body.Data)
+}
+
+func TestAccepted_NilData(t *testing.T) {
+	engine := gin.New()
+	engine.POST("/test", func(c *gin.Context) {
+		Accepted(c, nil)
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/test", nil)
+	w := httptest.NewRecorder()
+	engine.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusAccepted, w.Code)
+
+	var raw map[string]any
+	err := json.Unmarshal(w.Body.Bytes(), &raw)
+	require.NoError(t, err)
+	_, hasData := raw["data"]
+	assert.False(t, hasData, "nil data should be omitted via omitempty")
+}
+
 func TestErrorCodeConstants(t *testing.T) {
 	// 验证错误码常量符合 6 位 HHHMMX 规范
 	// 通用模块 (MM=00)
