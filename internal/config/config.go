@@ -58,12 +58,12 @@ type ChannelConfig struct {
 // 通过 publisher.Publish(event) 写入 EventBus。
 // Enabled=false 时仅使用 Webhook 作为唯一数据源。
 type KafkaConfig struct {
-	Enabled  bool     `mapstructure:"enabled"`    // 是否启用 Kafka 数据源
-	Brokers  []string `mapstructure:"brokers"`    // Kafka broker 地址
-	Topic    string   `mapstructure:"topic"`      // 外部事件 Topic（数据源 Topic）
-	GroupID  string   `mapstructure:"group_id"`   // Consumer Group ID
-	SASLUser string   `mapstructure:"sasl_user"`  // 可选 SASL 认证
-	SASLPass string   `mapstructure:"sasl_pass"`  // 可选 SASL 认证
+	Enabled  bool     `mapstructure:"enabled"`   // 是否启用 Kafka 数据源
+	Brokers  []string `mapstructure:"brokers"`   // Kafka broker 地址
+	Topic    string   `mapstructure:"topic"`     // 外部事件 Topic（数据源 Topic）
+	GroupID  string   `mapstructure:"group_id"`  // Consumer Group ID
+	SASLUser string   `mapstructure:"sasl_user"` // 可选 SASL 认证
+	SASLPass string   `mapstructure:"sasl_pass"` // 可选 SASL 认证
 }
 
 // EventBusConfig 事件总线层配置（EventBus Layer）。
@@ -74,18 +74,18 @@ type KafkaConfig struct {
 // Fallback 机制仅作用于 EventBus 层：当 Mode="kafka" 且 Kafka 不可用时，
 // 自动降级到内存 Channel，确保事件不丢失。
 type EventBusConfig struct {
-	Mode  string              `mapstructure:"mode"`   // "channel" | "kafka"
-	Kafka EventBusKafkaConfig `mapstructure:"kafka"`  // EventBus Kafka 配置
+	Mode  string              `mapstructure:"mode"`  // "channel" | "kafka"
+	Kafka EventBusKafkaConfig `mapstructure:"kafka"` // EventBus Kafka 配置
 }
 
 // EventBusKafkaConfig EventBus 层 Kafka 实现配置。
 // 用于 EventBus 的 Publisher/Consumer 共享同一个 Kafka Topic。
 type EventBusKafkaConfig struct {
-	Brokers  []string `mapstructure:"brokers"`    // Kafka broker 地址
-	Topic    string   `mapstructure:"topic"`      // EventBus 内部 Topic
-	GroupID  string   `mapstructure:"group_id"`   // Consumer Group ID
-	SASLUser string   `mapstructure:"sasl_user"`  // 可选 SASL 认证
-	SASLPass string   `mapstructure:"sasl_pass"`  // 可选 SASL 认证
+	Brokers  []string `mapstructure:"brokers"`   // Kafka broker 地址
+	Topic    string   `mapstructure:"topic"`     // EventBus 内部 Topic
+	GroupID  string   `mapstructure:"group_id"`  // Consumer Group ID
+	SASLUser string   `mapstructure:"sasl_user"` // 可选 SASL 认证
+	SASLPass string   `mapstructure:"sasl_pass"` // 可选 SASL 认证
 }
 
 // PGConfig PostgreSQL 配置。
