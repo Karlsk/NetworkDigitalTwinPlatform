@@ -42,16 +42,16 @@ type SchemaVersionRepository interface {
 // ---------------------------------------------------------------------------
 
 type pgSchemaVersionRepo struct {
-	pool *pgxpool.Pool
+	db pgQuerier
 }
 
 // NewPGSchemaVersionRepository 创建基于 PostgreSQL 的 SchemaVersionRepository。
 func NewPGSchemaVersionRepository(pool *pgxpool.Pool) SchemaVersionRepository {
-	return &pgSchemaVersionRepo{pool: pool}
+	return &pgSchemaVersionRepo{db: pool}
 }
 
 func (r *pgSchemaVersionRepo) Create(ctx context.Context, rec *SchemaVersionRecord) error {
-	err := r.pool.QueryRow(ctx,
+	err := r.db.QueryRow(ctx,
 		`INSERT INTO schema_versions (version, entity_types, relation_types, applied_at, description)
 		 VALUES ($1, $2, $3, $4, $5)
 		 RETURNING id`,
@@ -65,7 +65,7 @@ func (r *pgSchemaVersionRepo) Create(ctx context.Context, rec *SchemaVersionReco
 
 func (r *pgSchemaVersionRepo) Latest(ctx context.Context) (*SchemaVersionRecord, error) {
 	rec := &SchemaVersionRecord{}
-	err := r.pool.QueryRow(ctx,
+	err := r.db.QueryRow(ctx,
 		`SELECT id, version, entity_types, relation_types, applied_at, description
 		 FROM schema_versions ORDER BY version DESC LIMIT 1`,
 	).Scan(&rec.ID, &rec.Version, &rec.EntityTypes, &rec.RelationTypes,
@@ -80,7 +80,7 @@ func (r *pgSchemaVersionRepo) Latest(ctx context.Context) (*SchemaVersionRecord,
 }
 
 func (r *pgSchemaVersionRepo) List(ctx context.Context) ([]SchemaVersionRecord, error) {
-	rows, err := r.pool.Query(ctx,
+	rows, err := r.db.Query(ctx,
 		`SELECT id, version, entity_types, relation_types, applied_at, description
 		 FROM schema_versions ORDER BY version DESC`)
 	if err != nil {

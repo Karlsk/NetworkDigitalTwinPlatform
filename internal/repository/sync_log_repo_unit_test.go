@@ -212,7 +212,7 @@ func TestMemSyncLogAutoID(t *testing.T) {
 	}
 	// 由于 List 按 StartedAt DESC 排序，两条 StartedAt 可能相同，用 ID 来判断自增
 	if got[0].ID >= got[1].ID {
-		// 如果排序恰好 ID 大的在前，说明 ID 是自增的
+		t.Logf("got[0].ID=%d >= got[1].ID=%d, IDs are auto-incremented", got[0].ID, got[1].ID)
 	}
 	// 直接检查所有 ID 不同且大于 0
 	if got[0].ID <= 0 || got[1].ID <= 0 {

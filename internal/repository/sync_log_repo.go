@@ -16,8 +16,8 @@ import (
 // SyncLogRecord 同步日志记录。
 type SyncLogRecord struct {
 	ID               int64
-	SyncType         string    // "full" / "incremental"
-	Status           string    // "success" / "failed"
+	SyncType         string // "full" / "incremental"
+	Status           string // "success" / "failed"
 	NodesCreated     int
 	RelationsCreated int
 	OrphanEdges      int
@@ -47,16 +47,16 @@ type SyncLogRepository interface {
 // ---------------------------------------------------------------------------
 
 type pgSyncLogRepo struct {
-	pool *pgxpool.Pool
+	db pgQuerier
 }
 
 // NewPGSyncLogRepository 创建基于 PostgreSQL 的 SyncLogRepository。
 func NewPGSyncLogRepository(pool *pgxpool.Pool) SyncLogRepository {
-	return &pgSyncLogRepo{pool: pool}
+	return &pgSyncLogRepo{db: pool}
 }
 
 func (r *pgSyncLogRepo) Create(ctx context.Context, rec SyncLogRecord) error {
-	err := r.pool.QueryRow(ctx,
+	err := r.db.QueryRow(ctx,
 		`INSERT INTO sync_logs (sync_type, status, nodes_created, relations_created,
 		 orphan_edges, warnings, error_message, started_at, completed_at, duration_ms)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
@@ -75,12 +75,12 @@ func (r *pgSyncLogRepo) List(ctx context.Context, limit int) ([]SyncLogRecord, e
 	var rows pgx.Rows
 	var err error
 	if limit > 0 {
-		rows, err = r.pool.Query(ctx,
+		rows, err = r.db.Query(ctx,
 			`SELECT id, sync_type, status, nodes_created, relations_created,
 			 orphan_edges, warnings, error_message, started_at, completed_at, duration_ms
 			 FROM sync_logs ORDER BY started_at DESC LIMIT $1`, limit)
 	} else {
-		rows, err = r.pool.Query(ctx,
+		rows, err = r.db.Query(ctx,
 			`SELECT id, sync_type, status, nodes_created, relations_created,
 			 orphan_edges, warnings, error_message, started_at, completed_at, duration_ms
 			 FROM sync_logs ORDER BY started_at DESC`)
@@ -113,13 +113,13 @@ func (r *pgSyncLogRepo) ListByType(ctx context.Context, syncType string, limit i
 	var rows pgx.Rows
 	var err error
 	if limit > 0 {
-		rows, err = r.pool.Query(ctx,
+		rows, err = r.db.Query(ctx,
 			`SELECT id, sync_type, status, nodes_created, relations_created,
 			 orphan_edges, warnings, error_message, started_at, completed_at, duration_ms
 			 FROM sync_logs WHERE sync_type = $1 ORDER BY started_at DESC LIMIT $2`,
 			syncType, limit)
 	} else {
-		rows, err = r.pool.Query(ctx,
+		rows, err = r.db.Query(ctx,
 			`SELECT id, sync_type, status, nodes_created, relations_created,
 			 orphan_edges, warnings, error_message, started_at, completed_at, duration_ms
 			 FROM sync_logs WHERE sync_type = $1 ORDER BY started_at DESC`,
@@ -151,7 +151,7 @@ func (r *pgSyncLogRepo) ListByType(ctx context.Context, syncType string, limit i
 
 func (r *pgSyncLogRepo) Count(ctx context.Context) (int64, error) {
 	var count int64
-	err := r.pool.QueryRow(ctx, `SELECT COUNT(*) FROM sync_logs`).Scan(&count)
+	err := r.db.QueryRow(ctx, `SELECT COUNT(*) FROM sync_logs`).Scan(&count)
 	if err != nil {
 		return 0, fmt.Errorf("pg sync_log repo: count: %w", err)
 	}

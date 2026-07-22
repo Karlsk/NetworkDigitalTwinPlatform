@@ -21,9 +21,9 @@ var ErrConnectorConfigNotFound = errors.New("connector config not found")
 type ConnectorConfigRecord struct {
 	ID          int64
 	Name        string
-	Type        string   // "mock" / "netbox" / "controller" / "cmdb"
-	Config      []byte   // JSON
-	EntityTypes []byte   // JSON array
+	Type        string // "mock" / "netbox" / "controller" / "cmdb"
+	Config      []byte // JSON
+	EntityTypes []byte // JSON array
 	Priority    int
 	Status      string // "active" / "disabled" / "error"
 	LastPing    *time.Time
@@ -50,16 +50,16 @@ type ConnectorConfigRepository interface {
 // ---------------------------------------------------------------------------
 
 type pgConnectorConfigRepo struct {
-	pool *pgxpool.Pool
+	db pgQuerier
 }
 
 // NewPGConnectorRepository 创建基于 PostgreSQL 的 ConnectorConfigRepository。
 func NewPGConnectorRepository(pool *pgxpool.Pool) ConnectorConfigRepository {
-	return &pgConnectorConfigRepo{pool: pool}
+	return &pgConnectorConfigRepo{db: pool}
 }
 
 func (r *pgConnectorConfigRepo) Upsert(ctx context.Context, rec ConnectorConfigRecord) error {
-	_, err := r.pool.Exec(ctx,
+	_, err := r.db.Exec(ctx,
 		`INSERT INTO connector_configs (name, type, config, entity_types, priority, status)
 		 VALUES ($1, $2, $3, $4, $5, $6)
 		 ON CONFLICT (name) DO UPDATE SET
@@ -79,7 +79,7 @@ func (r *pgConnectorConfigRepo) Upsert(ctx context.Context, rec ConnectorConfigR
 
 func (r *pgConnectorConfigRepo) GetByName(ctx context.Context, name string) (*ConnectorConfigRecord, error) {
 	rec := &ConnectorConfigRecord{}
-	err := r.pool.QueryRow(ctx,
+	err := r.db.QueryRow(ctx,
 		`SELECT id, name, type, config, entity_types, priority, status, last_ping
 		 FROM connector_configs WHERE name = $1`, name,
 	).Scan(&rec.ID, &rec.Name, &rec.Type, &rec.Config, &rec.EntityTypes,
@@ -94,7 +94,7 @@ func (r *pgConnectorConfigRepo) GetByName(ctx context.Context, name string) (*Co
 }
 
 func (r *pgConnectorConfigRepo) List(ctx context.Context) ([]ConnectorConfigRecord, error) {
-	rows, err := r.pool.Query(ctx,
+	rows, err := r.db.Query(ctx,
 		`SELECT id, name, type, config, entity_types, priority, status, last_ping
 		 FROM connector_configs ORDER BY name ASC`)
 	if err != nil {
@@ -118,7 +118,7 @@ func (r *pgConnectorConfigRepo) List(ctx context.Context) ([]ConnectorConfigReco
 }
 
 func (r *pgConnectorConfigRepo) UpdateStatus(ctx context.Context, name, status string) error {
-	tag, err := r.pool.Exec(ctx,
+	tag, err := r.db.Exec(ctx,
 		`UPDATE connector_configs SET status = $2, updated_at = NOW() WHERE name = $1`,
 		name, status)
 	if err != nil {
@@ -131,7 +131,7 @@ func (r *pgConnectorConfigRepo) UpdateStatus(ctx context.Context, name, status s
 }
 
 func (r *pgConnectorConfigRepo) UpdateLastPing(ctx context.Context, name string, t time.Time) error {
-	tag, err := r.pool.Exec(ctx,
+	tag, err := r.db.Exec(ctx,
 		`UPDATE connector_configs SET last_ping = $2, updated_at = NOW() WHERE name = $1`,
 		name, t)
 	if err != nil {
@@ -144,7 +144,7 @@ func (r *pgConnectorConfigRepo) UpdateLastPing(ctx context.Context, name string,
 }
 
 func (r *pgConnectorConfigRepo) Delete(ctx context.Context, name string) error {
-	tag, err := r.pool.Exec(ctx, `DELETE FROM connector_configs WHERE name = $1`, name)
+	tag, err := r.db.Exec(ctx, `DELETE FROM connector_configs WHERE name = $1`, name)
 	if err != nil {
 		return fmt.Errorf("pg connector repo: delete %q: %w", name, err)
 	}

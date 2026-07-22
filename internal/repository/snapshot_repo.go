@@ -61,16 +61,16 @@ type SnapshotRepository interface {
 // ---------------------------------------------------------------------------
 
 type pgSnapshotRepo struct {
-	pool *pgxpool.Pool
+	db pgQuerier
 }
 
 // NewPGSnapshotRepository 创建基于 PostgreSQL 的 SnapshotRepository。
 func NewPGSnapshotRepository(pool *pgxpool.Pool) SnapshotRepository {
-	return &pgSnapshotRepo{pool: pool}
+	return &pgSnapshotRepo{db: pool}
 }
 
 func (r *pgSnapshotRepo) Create(ctx context.Context, rec *SnapshotRecord) error {
-	err := r.pool.QueryRow(ctx,
+	err := r.db.QueryRow(ctx,
 		`INSERT INTO snapshots (name, created_at, node_count, rel_count, file_path, status)
 		 VALUES ($1, $2, $3, $4, $5, $6)
 		 RETURNING id`,
@@ -84,7 +84,7 @@ func (r *pgSnapshotRepo) Create(ctx context.Context, rec *SnapshotRecord) error 
 
 func (r *pgSnapshotRepo) GetByName(ctx context.Context, name string) (*SnapshotRecord, error) {
 	rec := &SnapshotRecord{}
-	err := r.pool.QueryRow(ctx,
+	err := r.db.QueryRow(ctx,
 		`SELECT id, name, created_at, node_count, rel_count, file_path, status
 		 FROM snapshots WHERE name = $1`, name,
 	).Scan(&rec.ID, &rec.Name, &rec.CreatedAt, &rec.NodeCount, &rec.RelCount, &rec.FilePath, &rec.Status)
@@ -98,7 +98,7 @@ func (r *pgSnapshotRepo) GetByName(ctx context.Context, name string) (*SnapshotR
 }
 
 func (r *pgSnapshotRepo) List(ctx context.Context) ([]SnapshotRecord, error) {
-	rows, err := r.pool.Query(ctx,
+	rows, err := r.db.Query(ctx,
 		`SELECT id, name, created_at, node_count, rel_count, file_path, status
 		 FROM snapshots ORDER BY created_at DESC`)
 	if err != nil {
@@ -121,7 +121,7 @@ func (r *pgSnapshotRepo) List(ctx context.Context) ([]SnapshotRecord, error) {
 }
 
 func (r *pgSnapshotRepo) Delete(ctx context.Context, name string) error {
-	tag, err := r.pool.Exec(ctx, `DELETE FROM snapshots WHERE name = $1`, name)
+	tag, err := r.db.Exec(ctx, `DELETE FROM snapshots WHERE name = $1`, name)
 	if err != nil {
 		return fmt.Errorf("pg snapshot repo: delete %q: %w", name, err)
 	}
@@ -132,7 +132,7 @@ func (r *pgSnapshotRepo) Delete(ctx context.Context, name string) error {
 }
 
 func (r *pgSnapshotRepo) UpdateStatus(ctx context.Context, name, status string) error {
-	tag, err := r.pool.Exec(ctx, `UPDATE snapshots SET status = $2 WHERE name = $1`, name, status)
+	tag, err := r.db.Exec(ctx, `UPDATE snapshots SET status = $2 WHERE name = $1`, name, status)
 	if err != nil {
 		return fmt.Errorf("pg snapshot repo: update status %q: %w", name, err)
 	}
@@ -295,7 +295,7 @@ func RunMigrations(pool *pgxpool.Pool) error {
 		return fmt.Errorf("create migrate instance: %w", err)
 	}
 
-	if err := m.Up(); err != nil && err != migrate.ErrNoChange {
+	if err := m.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
 		return fmt.Errorf("run migrations: %w", err)
 	}
 

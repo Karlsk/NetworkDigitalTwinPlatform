@@ -46,16 +46,16 @@ type AuditLogRepository interface {
 // ---------------------------------------------------------------------------
 
 type pgAuditLogRepo struct {
-	pool *pgxpool.Pool
+	db pgQuerier
 }
 
 // NewPGAuditLogRepository 创建基于 PostgreSQL 的 AuditLogRepository。
 func NewPGAuditLogRepository(pool *pgxpool.Pool) AuditLogRepository {
-	return &pgAuditLogRepo{pool: pool}
+	return &pgAuditLogRepo{db: pool}
 }
 
 func (r *pgAuditLogRepo) Create(ctx context.Context, rec AuditLogRecord) error {
-	_, err := r.pool.Exec(ctx,
+	_, err := r.db.Exec(ctx,
 		`INSERT INTO audit_logs (timestamp, action, snapshot, actor, detail, error)
 		 VALUES ($1, $2, $3, $4, $5, $6)`,
 		rec.Timestamp, rec.Action, rec.Snapshot, rec.Actor, rec.Detail, rec.Error)
@@ -66,7 +66,7 @@ func (r *pgAuditLogRepo) Create(ctx context.Context, rec AuditLogRecord) error {
 }
 
 func (r *pgAuditLogRepo) List(ctx context.Context, limit int) ([]AuditLogRecord, error) {
-	rows, err := r.pool.Query(ctx,
+	rows, err := r.db.Query(ctx,
 		`SELECT id, timestamp, action, snapshot, actor, detail, error
 		 FROM audit_logs ORDER BY timestamp DESC LIMIT $1`, limit)
 	if err != nil {
@@ -113,12 +113,11 @@ func (r *pgAuditLogRepo) Query(ctx context.Context, f AuditFilter) ([]AuditLogRe
 	if !f.Until.IsZero() {
 		query += fmt.Sprintf(" AND timestamp <= $%d", argIdx)
 		args = append(args, f.Until)
-		argIdx++
 	}
 
 	query += " ORDER BY timestamp DESC LIMIT 1000"
 
-	rows, err := r.pool.Query(ctx, query, args...)
+	rows, err := r.db.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("pg audit log repo: query: %w", err)
 	}
@@ -141,7 +140,7 @@ func (r *pgAuditLogRepo) Query(ctx context.Context, f AuditFilter) ([]AuditLogRe
 
 func (r *pgAuditLogRepo) Count(ctx context.Context) (int64, error) {
 	var count int64
-	err := r.pool.QueryRow(ctx, `SELECT COUNT(*) FROM audit_logs`).Scan(&count)
+	err := r.db.QueryRow(ctx, `SELECT COUNT(*) FROM audit_logs`).Scan(&count)
 	if err != nil {
 		return 0, fmt.Errorf("pg audit log repo: count: %w", err)
 	}

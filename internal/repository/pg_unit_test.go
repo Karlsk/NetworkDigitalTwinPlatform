@@ -21,6 +21,40 @@ func TestPGConfigDefaults(t *testing.T) {
 	}
 }
 
+// TestPGConstructors 验证所有 PG Repository 构造函数接受 nil pool 不 panic。
+func TestPGConstructors(t *testing.T) {
+	t.Run("NewPGSnapshotRepository", func(t *testing.T) {
+		repo := NewPGSnapshotRepository(nil)
+		if repo == nil {
+			t.Fatal("NewPGSnapshotRepository(nil) returned nil")
+		}
+	})
+	t.Run("NewPGConnectorRepository", func(t *testing.T) {
+		repo := NewPGConnectorRepository(nil)
+		if repo == nil {
+			t.Fatal("NewPGConnectorRepository(nil) returned nil")
+		}
+	})
+	t.Run("NewPGAuditLogRepository", func(t *testing.T) {
+		repo := NewPGAuditLogRepository(nil)
+		if repo == nil {
+			t.Fatal("NewPGAuditLogRepository(nil) returned nil")
+		}
+	})
+	t.Run("NewPGSyncLogRepository", func(t *testing.T) {
+		repo := NewPGSyncLogRepository(nil)
+		if repo == nil {
+			t.Fatal("NewPGSyncLogRepository(nil) returned nil")
+		}
+	})
+	t.Run("NewPGSchemaVersionRepository", func(t *testing.T) {
+		repo := NewPGSchemaVersionRepository(nil)
+		if repo == nil {
+			t.Fatal("NewPGSchemaVersionRepository(nil) returned nil")
+		}
+	})
+}
+
 // TestNewPGPoolInvalidURL 验证无效 URL 返回 error（不依赖 Docker）。
 func TestNewPGPoolInvalidURL(t *testing.T) {
 	ctx := context.Background()
@@ -41,7 +75,7 @@ func TestNewPGPoolUnreachableHost(t *testing.T) {
 		URL: "postgres://user:pass@localhost:59999/nonexistent?sslmode=disable",
 	})
 	if err == nil {
-		t.Fatal("NewPGPool() with cancelled context should return error")
+		t.Fatal("NewPGPool() with canceled context should return error")
 	}
 }
 
