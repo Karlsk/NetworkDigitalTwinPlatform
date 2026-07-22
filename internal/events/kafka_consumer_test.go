@@ -19,13 +19,13 @@ type mockConsumerGroupSession struct {
 	markedMsgIDs []int64 // 记录 MarkMessage 的 offset
 }
 
-func (m *mockConsumerGroupSession) Claims() map[string][]int32    { return nil }
-func (m *mockConsumerGroupSession) MemberID() string              { return "mock-member" }
-func (m *mockConsumerGroupSession) GenerationID() int32           { return 1 }
-func (m *mockConsumerGroupSession) Commit()                       {}
-func (m *mockConsumerGroupSession) MarkOffset(string, int32, int64, string) {}
+func (m *mockConsumerGroupSession) Claims() map[string][]int32               { return nil }
+func (m *mockConsumerGroupSession) MemberID() string                         { return "mock-member" }
+func (m *mockConsumerGroupSession) GenerationID() int32                      { return 1 }
+func (m *mockConsumerGroupSession) Commit()                                  {}
+func (m *mockConsumerGroupSession) MarkOffset(string, int32, int64, string)  {}
 func (m *mockConsumerGroupSession) ResetOffset(string, int32, int64, string) {}
-func (m *mockConsumerGroupSession) Context() context.Context      { return m.ctx }
+func (m *mockConsumerGroupSession) Context() context.Context                 { return m.ctx }
 
 func (m *mockConsumerGroupSession) MarkMessage(msg *sarama.ConsumerMessage, _ string) {
 	m.markedMsgIDs = append(m.markedMsgIDs, msg.Offset)
@@ -39,10 +39,10 @@ type mockConsumerGroupClaim struct {
 	messages chan *sarama.ConsumerMessage
 }
 
-func (m *mockConsumerGroupClaim) Topic() string                        { return "test-topic" }
-func (m *mockConsumerGroupClaim) Partition() int32                     { return 0 }
-func (m *mockConsumerGroupClaim) InitialOffset() int64                 { return 0 }
-func (m *mockConsumerGroupClaim) HighWaterMarkOffset() int64           { return 100 }
+func (m *mockConsumerGroupClaim) Topic() string                            { return "test-topic" }
+func (m *mockConsumerGroupClaim) Partition() int32                         { return 0 }
+func (m *mockConsumerGroupClaim) InitialOffset() int64                     { return 0 }
+func (m *mockConsumerGroupClaim) HighWaterMarkOffset() int64               { return 100 }
 func (m *mockConsumerGroupClaim) Messages() <-chan *sarama.ConsumerMessage { return m.messages }
 
 // ---------------------------------------------------------------------------
@@ -387,4 +387,49 @@ func (m *mockEventPublisher) Publish(ctx context.Context, event SyncEvent) error
 func (m *mockEventPublisher) Close() error {
 	m.closed = true
 	return nil
+}
+
+// ---------------------------------------------------------------------------
+// consumerHandler Setup/Cleanup 测试
+// ---------------------------------------------------------------------------
+
+// TestConsumerHandlerSetupCleanup 验证 Setup 和 Cleanup 返回 nil。
+func TestConsumerHandlerSetupCleanup(t *testing.T) {
+	h := &consumerHandler{handler: func(_ context.Context, _ SyncEvent) error { return nil }}
+	session := &mockConsumerGroupSession{ctx: context.Background()}
+
+	if err := h.Setup(session); err != nil {
+		t.Errorf("Setup() error = %v, want nil", err)
+	}
+	if err := h.Cleanup(session); err != nil {
+		t.Errorf("Cleanup() error = %v, want nil", err)
+	}
+}
+
+// TestNewKafkaConsumerInvalidBrokers 验证无效 broker 地址返回 error。
+func TestNewKafkaConsumerInvalidBrokers(t *testing.T) {
+	cfg := sarama.NewConfig()
+	cfg.Consumer.Return.Errors = true
+	_, err := NewKafkaConsumer([]string{"localhost:59999"}, "test-topic", "test-group", cfg)
+	if err == nil {
+		t.Fatal("NewKafkaConsumer() with unreachable broker should return error")
+	}
+}
+
+// TestNewKafkaDataSourceConsumerInvalidBrokers 验证无效 broker 地址返回 error。
+func TestNewKafkaDataSourceConsumerInvalidBrokers(t *testing.T) {
+	cfg := sarama.NewConfig()
+	cfg.Consumer.Return.Errors = true
+	_, err := NewKafkaDataSourceConsumer([]string{"localhost:59999"}, "test-topic", "test-group", cfg)
+	if err == nil {
+		t.Fatal("NewKafkaDataSourceConsumer() with unreachable broker should return error")
+	}
+}
+
+// TestKafkaDataSourceConsumerCloseNilInner 验证 inner 为 nil 时 Close 不 panic。
+func TestKafkaDataSourceConsumerCloseNilInner(t *testing.T) {
+	d := &KafkaDataSourceConsumer{}
+	if err := d.Close(); err != nil {
+		t.Fatalf("Close() with nil inner error = %v, want nil", err)
+	}
 }

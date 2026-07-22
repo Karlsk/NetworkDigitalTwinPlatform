@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
+
+	"github.com/IBM/sarama"
 )
 
 // mockSyncProducer 实现 syncProducer 窄接口用于单元测试。
@@ -110,5 +112,24 @@ func TestKafkaClose(t *testing.T) {
 	}
 	if !mock.closed {
 		t.Error("Close() did not close the producer")
+	}
+}
+
+// TestKafkaPublisherPingNilClient 验证 Ping 在 client 为 nil 时返回 error。
+func TestKafkaPublisherPingNilClient(t *testing.T) {
+	pub := &kafkaPublisher{producer: &mockSyncProducer{}, topic: "t"}
+	err := pub.Ping()
+	if err == nil {
+		t.Fatal("Ping() with nil client should return error")
+	}
+}
+
+// TestNewKafkaPublisherInvalidBrokers 验证无效 broker 地址返回 error。
+func TestNewKafkaPublisherInvalidBrokers(t *testing.T) {
+	cfg := sarama.NewConfig()
+	cfg.Producer.Return.Successes = true
+	_, err := NewKafkaPublisher([]string{"localhost:59999"}, "test-topic", cfg)
+	if err == nil {
+		t.Fatal("NewKafkaPublisher() with unreachable broker should return error")
 	}
 }

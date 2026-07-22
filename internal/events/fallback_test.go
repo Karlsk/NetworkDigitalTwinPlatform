@@ -15,10 +15,10 @@ import (
 // ---------------------------------------------------------------------------
 
 type mockPingPublisher struct {
-	mu          sync.Mutex
-	publishFunc func(ctx context.Context, event SyncEvent) error
-	closeFunc   func() error
-	pingFunc    func() error
+	mu           sync.Mutex
+	publishFunc  func(ctx context.Context, event SyncEvent) error
+	closeFunc    func() error
+	pingFunc     func() error
 	publishCalls int
 	closeCalls   int
 	closed       bool

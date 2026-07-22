@@ -11,9 +11,9 @@ import (
 // saslUser 非空时启用 SASL/PLAINTEXT 认证。
 func NewSaramaConfig(saslUser, saslPass string) (*sarama.Config, error) {
 	cfg := sarama.NewConfig()
-	cfg.Producer.RequiredAcks = sarama.WaitForAll  // 等待所有副本确认
-	cfg.Producer.Retry.Max = 3                      // 最多重试 3 次
-	cfg.Producer.Return.Successes = true            // SyncProducer 必须设置
+	cfg.Producer.RequiredAcks = sarama.WaitForAll // 等待所有副本确认
+	cfg.Producer.Retry.Max = 3                    // 最多重试 3 次
+	cfg.Producer.Return.Successes = true          // SyncProducer 必须设置
 	cfg.Consumer.Return.Errors = true
 	cfg.Consumer.Group.Rebalance.GroupStrategies = []sarama.BalanceStrategy{sarama.NewBalanceStrategyRoundRobin()}
 	cfg.Consumer.Offsets.Initial = sarama.OffsetOldest // 从最早消息开始消费

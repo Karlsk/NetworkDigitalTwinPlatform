@@ -3,6 +3,7 @@ package events
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -157,7 +158,7 @@ func TestChannelConsumeCancel(t *testing.T) {
 
 	select {
 	case err := <-done:
-		if err != context.Canceled {
+		if !errors.Is(err, context.Canceled) {
 			t.Errorf("Consume() error = %v, want context.Canceled", err)
 		}
 	case <-time.After(2 * time.Second):

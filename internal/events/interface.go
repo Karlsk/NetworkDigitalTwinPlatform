@@ -17,12 +17,12 @@ type Relation struct {
 // 此处重新定义以避免循环导入。
 // Action 支持三种值: "update", "delete", "delete_relation"。
 type SyncEvent struct {
-	Action     string           `json:"action"`                // "update", "delete", "delete_relation"
-	EntityType string           `json:"entity_type"`           // 实体类型
-	Connector  string           `json:"connector"`             // 连接器名称
-	Data       []map[string]any `json:"data,omitempty"`        // update 时的数据 (Webhook 原始 JSON)
-	URIs       []string         `json:"uris,omitempty"`        // delete 时的 URI 列表
-	Relations  []Relation       `json:"relations,omitempty"`   // delete_relation 时的关系列表
+	Action     string           `json:"action"`              // "update", "delete", "delete_relation"
+	EntityType string           `json:"entity_type"`         // 实体类型
+	Connector  string           `json:"connector"`           // 连接器名称
+	Data       []map[string]any `json:"data,omitempty"`      // update 时的数据 (Webhook 原始 JSON)
+	URIs       []string         `json:"uris,omitempty"`      // delete 时的 URI 列表
+	Relations  []Relation       `json:"relations,omitempty"` // delete_relation 时的关系列表
 }
 
 // EventPublisher 事件发布者接口。
