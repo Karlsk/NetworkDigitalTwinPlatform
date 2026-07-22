@@ -273,6 +273,20 @@ func backupAndRestoreDefault(t *testing.T, client graph.GraphDB) func() {
 	}
 }
 
+// testdataDir 返回 testdata/mock_netbox 目录的绝对路径。
+func testdataDir(t *testing.T) string {
+	t.Helper()
+	dataDir := filepath.Join("..", "..", "testdata", "mock_netbox")
+	absDir, err := filepath.Abs(dataDir)
+	if err != nil {
+		t.Fatalf("testdataDir: filepath.Abs(%s) error = %v", dataDir, err)
+	}
+	if _, err := os.Stat(absDir); os.IsNotExist(err) {
+		t.Skipf("testdata/mock_netbox not found at %s", absDir)
+	}
+	return absDir
+}
+
 // setupE2EControllerServer 创建模拟 Controller API 的 httptest server。
 // 返回包含 Device/Interface/Link/Alarm/VPN/Tunnel/ISIS/BGP 8 种实体的最小 mock 数据。
 func setupE2EControllerServer(t *testing.T) *httptest.Server {
