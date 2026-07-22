@@ -38,9 +38,9 @@ func RunHTTP(ctx context.Context, server *mcpsdk.Server, addr string) error {
 	select {
 	case <-ctx.Done():
 		slog.Info("MCP server shutting down")
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second) //nolint:contextcheck
 		defer cancel()
-		if err := httpServer.Shutdown(shutdownCtx); err != nil {
+		if err := httpServer.Shutdown(shutdownCtx); err != nil { //nolint:contextcheck
 			return err
 		}
 		return nil

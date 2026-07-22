@@ -156,12 +156,12 @@ func TestListTools(t *testing.T) {
 	}
 
 	wantNames := map[string]bool{
-		"query_topology":    false,
-		"query_snapshot":    false,
-		"sync_data":         false,
-		"restore_snapshot":  false,
-		"query_monitor":     false,
-		"query_device_info": false,
+		"query_topology":      false,
+		"query_snapshot":      false,
+		"sync_data":           false,
+		"restore_snapshot":    false,
+		"query_monitor":       false,
+		"query_device_info":   false,
 		"query_topology_live": false,
 	}
 	for _, tool := range res.Tools {
@@ -754,5 +754,185 @@ func TestQueryTopologyLiveError(t *testing.T) {
 	}
 	if !res.IsError {
 		t.Error("expected IsError=true for query topology live error")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// TC-M18: query_snapshot audit action — 验证审计日志查询
+// ---------------------------------------------------------------------------
+
+func TestQuerySnapshotAudit(t *testing.T) {
+	h := &toolHandlers{
+		analysisSvc: &mockAnalysisService{},
+		snapshotSvc: &mockSnapshotService{},
+		syncSvc:     &mockSyncService{},
+		deviceSvc:   &mockDeviceService{},
+	}
+	cs := newTestServer(t, h)
+
+	ctx := context.Background()
+	res, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name:      "query_snapshot",
+		Arguments: map[string]any{"action": "audit", "limit": 10},
+	})
+	if err != nil {
+		t.Fatalf("CallTool(query_snapshot) error = %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("CallTool(query_snapshot) IsError=true, content=%v", res.Content)
+	}
+
+	var out QuerySnapshotOutput
+	extractStructuredOutput(t, res.StructuredContent, &out)
+	// mock AuditRecent 返回空列表，验证不报错且结果结构正确
+	_ = out.Audit // Audit 可以为 nil（mock 返回空切片）
+}
+
+// ---------------------------------------------------------------------------
+// TC-M19: query_snapshot diff 缺参数 — IsError=true
+// ---------------------------------------------------------------------------
+
+func TestQuerySnapshotDiffMissingParams(t *testing.T) {
+	h := &toolHandlers{
+		analysisSvc: &mockAnalysisService{},
+		snapshotSvc: &mockSnapshotService{},
+		syncSvc:     &mockSyncService{},
+		deviceSvc:   &mockDeviceService{},
+	}
+	cs := newTestServer(t, h)
+
+	ctx := context.Background()
+	res, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name:      "query_snapshot",
+		Arguments: map[string]any{"action": "diff", "snap_a": "snap-001"}, // 缺少 snap_b
+	})
+	if err != nil {
+		t.Fatalf("CallTool(query_snapshot) error = %v", err)
+	}
+	if !res.IsError {
+		t.Error("expected IsError=true for missing snap_b parameter")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// TC-M20: query_snapshot unknown action — IsError=true
+// ---------------------------------------------------------------------------
+
+func TestQuerySnapshotUnknownAction(t *testing.T) {
+	h := &toolHandlers{
+		analysisSvc: &mockAnalysisService{},
+		snapshotSvc: &mockSnapshotService{},
+		syncSvc:     &mockSyncService{},
+		deviceSvc:   &mockDeviceService{},
+	}
+	cs := newTestServer(t, h)
+
+	ctx := context.Background()
+	res, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name:      "query_snapshot",
+		Arguments: map[string]any{"action": "invalid"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool(query_snapshot) error = %v", err)
+	}
+	if !res.IsError {
+		t.Error("expected IsError=true for unknown action")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// TC-M21: query_monitor invalid end_time — IsError=true
+// ---------------------------------------------------------------------------
+
+func TestQueryMonitorInvalidEndTime(t *testing.T) {
+	h := &toolHandlers{
+		analysisSvc: &mockAnalysisService{},
+		snapshotSvc: &mockSnapshotService{},
+		syncSvc:     &mockSyncService{},
+		deviceSvc:   &mockDeviceService{},
+	}
+	cs := newTestServer(t, h)
+
+	ctx := context.Background()
+	res, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name:      "query_monitor",
+		Arguments: map[string]any{"connector_name": "ctrl", "query_type": "device", "end_time": "not-a-time"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool(query_monitor) error = %v", err)
+	}
+	if !res.IsError {
+		t.Error("expected IsError=true for invalid end_time")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// TC-M22: restore_snapshot 有效名称但失败 — IsError=true
+// ---------------------------------------------------------------------------
+
+func TestRestoreSnapshotError(t *testing.T) {
+	mockSvc := &mockSnapshotService{restoreErr: errors.New("restore failed")}
+	h := &toolHandlers{
+		analysisSvc: &mockAnalysisService{},
+		snapshotSvc: mockSvc,
+		syncSvc:     &mockSyncService{},
+		deviceSvc:   &mockDeviceService{},
+	}
+	cs := newTestServer(t, h)
+
+	ctx := context.Background()
+	res, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name:      "restore_snapshot",
+		Arguments: map[string]any{"snapshot_name": "snap-001"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool(restore_snapshot) error = %v", err)
+	}
+	if !res.IsError {
+		t.Error("expected IsError=true for restore failure")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// TC-M23: NewNetworkTwinServer — nil 服务指针不 panic
+// ---------------------------------------------------------------------------
+
+func TestNewNetworkTwinServer(t *testing.T) {
+	srv := NewNetworkTwinServer(nil, nil, nil, nil)
+	if srv == nil {
+		t.Fatal("NewNetworkTwinServer(nil, nil, nil, nil) returned nil")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// TC-M24: RunHTTP — 上下文取消后 graceful shutdown
+// ---------------------------------------------------------------------------
+
+func TestRunHTTPContextCancel(t *testing.T) {
+	h := &toolHandlers{
+		analysisSvc: &mockAnalysisService{},
+		snapshotSvc: &mockSnapshotService{},
+		syncSvc:     &mockSyncService{},
+		deviceSvc:   &mockDeviceService{},
+	}
+	srv := newServer(h)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- RunHTTP(ctx, srv, "127.0.0.1:0")
+	}()
+
+	// 短暂等待服务器启动
+	time.Sleep(100 * time.Millisecond)
+	cancel() // 触发 graceful shutdown
+
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Errorf("RunHTTP() error = %v, want nil after cancel", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("RunHTTP() did not shut down within 5s after context cancel")
 	}
 }
