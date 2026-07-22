@@ -1,3 +1,11 @@
+//	@title			Network Digital Twin API
+//	@version		2.0.0
+//	@description	网络数字孪生平台 REST API 文档。
+//	@BasePath		/api/v1
+//	@host			localhost:8080
+//	@schemes		http
+//
+// Package main 服务入口
 package main
 
 import (
@@ -18,6 +26,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
+	_ "gitlab.com/pml/network-digital-twin/docs/swagger"
 	"gitlab.com/pml/network-digital-twin/internal/api"
 	"gitlab.com/pml/network-digital-twin/internal/assembler"
 	"gitlab.com/pml/network-digital-twin/internal/config"

@@ -10,6 +10,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -62,14 +63,6 @@ func extractStructured(raw any, dst any) error {
 		return fmt.Errorf("marshal: %w", err)
 	}
 	return json.Unmarshal(data, dst)
-}
-
-// assertEqual 简易断言。
-func assertEqual(name string, got, want any) error {
-	if fmt.Sprintf("%v", got) != fmt.Sprintf("%v", want) {
-		return fmt.Errorf("%s: got %v, want %v", name, got, want)
-	}
-	return nil
 }
 
 // assertGTE 断言 got >= want。
@@ -472,7 +465,7 @@ func main() {
 		if err == nil {
 			printResult(idx, total, tc.name, "PASS", tc.desc)
 			passed++
-		} else if se, ok := err.(*skipError); ok {
+		} else if se := (*skipError)(nil); errors.As(err, &se) {
 			printResult(idx, total, tc.name, "SKIP", se.reason)
 			skipped++
 		} else {

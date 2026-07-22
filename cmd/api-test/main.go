@@ -222,7 +222,7 @@ func main() {
 
 	now := time.Now()
 	hourAgo := now.Add(-1 * time.Hour)
-	testDevice := ""       // 动态获取第一个设备名
+	testDevice := "" // 动态获取第一个设备名
 	testPort := "GigabitEthernet0/0/0"
 	testVPN := ""          // 动态获取第一个真实 VPN ID (svc-name)
 	testTunnel := ""       // 动态获取第一个真实 Tunnel 名 (tunnel-name)
@@ -491,7 +491,7 @@ func testSRTEAPIs(r *testRunner, c *controller.ControllerClient, ctx context.Con
 			return "", fmt.Errorf("expected ErrNotImplemented but got nil")
 		}
 		if !strings.Contains(err.Error(), "not implemented") {
-			return "", fmt.Errorf("expected ErrNotImplemented, got: %v", err)
+			return "", fmt.Errorf("expected ErrNotImplemented, got: %w", err)
 		}
 		return "ErrNotImplemented (预期)", nil
 	})
@@ -502,7 +502,7 @@ func testSRTEAPIs(r *testRunner, c *controller.ControllerClient, ctx context.Con
 			return "", fmt.Errorf("expected ErrNotImplemented but got nil")
 		}
 		if !strings.Contains(err.Error(), "not implemented") {
-			return "", fmt.Errorf("expected ErrNotImplemented, got: %v", err)
+			return "", fmt.Errorf("expected ErrNotImplemented, got: %w", err)
 		}
 		return "ErrNotImplemented (预期)", nil
 	})

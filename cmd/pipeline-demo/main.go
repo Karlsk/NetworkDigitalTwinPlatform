@@ -7,8 +7,8 @@
 //
 // 前置条件:
 //
-//	1. Neo4j 已启动: docker-compose -f deploy/docker-compose.yml up -d
-//	2. Neo4j 密码: 默认 "password"，可通过 NEO4J_PASSWORD 环境变量覆盖
+//  1. Neo4j 已启动: docker-compose -f deploy/docker-compose.yml up -d
+//  2. Neo4j 密码: 默认 "password"，可通过 NEO4J_PASSWORD 环境变量覆盖
 package main
 
 import (
@@ -586,7 +586,7 @@ func toInt(rows []map[string]any, key string) int {
 	if len(rows) == 0 {
 		return 0
 	}
-	v, _ := rows[0][key]
+	v := rows[0][key]
 	switch n := v.(type) {
 	case int64:
 		return int(n)
@@ -598,4 +598,3 @@ func toInt(rows []map[string]any, key string) int {
 		return 0
 	}
 }
-

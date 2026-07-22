@@ -115,8 +115,8 @@ func (r *testRunner) flushResults() {
 	if err != nil {
 		return
 	}
-	f.Write(data)
-	f.Sync()
+	_, _ = f.Write(data)
+	_ = f.Sync()
 	f.Close()
 }
 
@@ -176,7 +176,7 @@ func extractHost(errMsg string) string {
 func safeClose(c interface{ Close() error }) {
 	defer func() {
 		if r := recover(); r != nil {
-			// 静默忽略 sarama 内部 panic，不影响测试结果判断
+			_ = r // 静默忽略 sarama 内部 panic，不影响测试结果判断
 		}
 	}()
 	c.Close()
@@ -201,8 +201,8 @@ func makeTestEvents(count int) []events.SyncEvent {
 // consumeEvents 启动 consumer 并收集指定数量的事件，超时自动退出。
 func consumeEvents(consumer events.EventConsumer, count int) ([]events.SyncEvent, error) {
 	var (
-		mu         sync.Mutex
-		received   []events.SyncEvent
+		mu          sync.Mutex
+		received    []events.SyncEvent
 		ctx, cancel = context.WithTimeout(context.Background(), consumeTimeout)
 	)
 	defer cancel()
@@ -551,11 +551,13 @@ func runTests(r *testRunner) bool {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		var received events.SyncEvent
-		go chanCon.Consume(ctx, func(_ context.Context, event events.SyncEvent) error {
-			received = event
-			cancel()
-			return nil
-		})
+		go func() { //nolint:errcheck
+			_ = chanCon.Consume(ctx, func(_ context.Context, event events.SyncEvent) error {
+				received = event
+				cancel()
+				return nil
+			})
+		}()
 		<-ctx.Done()
 
 		if received.Action != "delete" {
