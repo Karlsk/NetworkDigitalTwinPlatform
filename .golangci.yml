@@ -1,10 +1,41 @@
-linters:
-  enable:
-    - errcheck
-    - govet
-    - staticcheck
-    - unused
-    - gosimple
-
 run:
   timeout: 5m
+  go: "1.26"
+
+linters:
+  enable:
+    - errcheck        # 未检查的 error 返回值
+    - gosimple        # 代码简化建议
+    - govet           # go vet 检查
+    - ineffassign     # 无效赋值
+    - staticcheck     # 静态分析
+    - unused          # 未使用的代码
+    - gofmt           # 格式化检查
+    - goimports       # import 排序
+    - misspell        # 拼写错误
+    - revive          # golint 替代
+    - bodyclose       # HTTP body 未关闭
+    - contextcheck    # context 传递检查
+    - errorlint       # error 包装检查
+    - nilerr          # nil error 检查
+
+linters-settings:
+  revive:
+    rules:
+      - name: exported
+        arguments:
+          - disableStutteringCheck
+  gofmt:
+    simplify: true
+  misspell:
+    locale: US
+
+issues:
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - errcheck
+        - bodyclose
+    - path: mock/
+      linters:
+        - revive
