@@ -117,10 +117,10 @@ func newOperatorTestConnector(t *testing.T, serverURL string) *ControllerConnect
 		connector.WithBaseURL(serverURL),
 	)
 	client := NewControllerClient("test-controller", httpClient, map[string]any{
-		"username":   "testuser",
-		"password":   "testpass",
-		"device_id":  "test-device",
-		"base_url":   serverURL,
+		"username":  "testuser",
+		"password":  "testpass",
+		"device_id": "test-device",
+		"base_url":  serverURL,
 	})
 	return NewControllerConnector("test-controller", client, []string{"Device", "ISIS", "BGP"}, serverURL)
 }

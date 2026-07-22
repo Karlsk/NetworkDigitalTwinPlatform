@@ -10,9 +10,9 @@ import (
 // ConnectorConfigEntry connectors.yaml 中单个 Connector 的配置。
 type ConnectorConfigEntry struct {
 	Name        string         `yaml:"name"`
-	Type        string         `yaml:"type"`          // "mock" / "netbox" / "cmdb" / "controller"
-	Config      map[string]any `yaml:"config"`        // 类型特定配置
-	EntityTypes []string       `yaml:"entity_types"`  // 采集的实体类型列表
+	Type        string         `yaml:"type"`           // "mock" / "netbox" / "cmdb" / "controller"
+	Config      map[string]any `yaml:"config"`         // 类型特定配置
+	EntityTypes []string       `yaml:"entity_types"`   // 采集的实体类型列表
 	Auth        AuthConfig     `yaml:"auth,omitempty"` // 认证配置
 }
 
@@ -21,12 +21,12 @@ type ConnectorConfigEntry struct {
 // 生产环境推荐使用 env 引用，避免密钥写入配置文件；
 // 开发环境可直接在 YAML 中写 token/password 字段方便调试。
 type AuthConfig struct {
-	Type        string `yaml:"type"`          // "none" / "basic" / "token"
-	Token       string `yaml:"token"`         // 直接值（dev 便捷，优先于 token_env）
-	TokenEnv    string `yaml:"token_env"`     // 环境变量名，生产环境推荐
-	Username    string `yaml:"username"`      // basic auth 用户名
-	Password    string `yaml:"password"`      // 直接值（dev 便捷，优先于 password_env）
-	PasswordEnv string `yaml:"password_env"`  // 环境变量名，生产环境推荐
+	Type        string `yaml:"type"`         // "none" / "basic" / "token"
+	Token       string `yaml:"token"`        // 直接值（dev 便捷，优先于 token_env）
+	TokenEnv    string `yaml:"token_env"`    // 环境变量名，生产环境推荐
+	Username    string `yaml:"username"`     // basic auth 用户名
+	Password    string `yaml:"password"`     // 直接值（dev 便捷，优先于 password_env）
+	PasswordEnv string `yaml:"password_env"` // 环境变量名，生产环境推荐
 }
 
 // connectorConfigFile connectors.yaml 顶层包装结构。

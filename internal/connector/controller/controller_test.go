@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"gitlab.com/pml/network-digital-twin/internal/connector"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gitlab.com/pml/network-digital-twin/internal/connector"
 )
 
 // ──────────────────────────────
@@ -126,10 +126,10 @@ func setupMockServer(t *testing.T) *httptest.Server {
 	mux.HandleFunc("/api/no/config/ietf-l3vpn-ntw:l3vpn-ntw/page", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]any{
-			"page_num":        1,
-			"page_size":       100,
-			"total_elements":  1,
-			"total_pages":     1,
+			"page_num":       1,
+			"page_size":      100,
+			"total_elements": 1,
+			"total_pages":    1,
 			"content": []map[string]any{
 				{
 					"_id": "6a44b85427cf1100170d5409",
@@ -709,7 +709,7 @@ func TestCollectVPN_MultiPage(t *testing.T) {
 	mux.HandleFunc("/api/no/config/ietf-l2vpn-svc:l2vpn-svc/page", func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]any{
 			"page_num": 1, "page_size": 100, "total_elements": 0, "total_pages": 1,
-			"content":   []map[string]any{},
+			"content": []map[string]any{},
 		})
 	})
 	server := httptest.NewServer(mux)
@@ -759,7 +759,7 @@ func TestCollectISIS_DeviceFailure(t *testing.T) {
 
 	c := newTestConnector(t, server.URL)
 	resources, err := c.Collect(context.Background(), "ISIS")
-	require.NoError(t, err) // 整体不应返回错误，只跳过失败设备
+	require.NoError(t, err)     // 整体不应返回错误，只跳过失败设备
 	assert.Len(t, resources, 1) // 只有 DEV-OK 的 1 个邻居
 }
 

@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"gitlab.com/pml/network-digital-twin/internal/connector"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gitlab.com/pml/network-digital-twin/internal/connector"
 )
 
 // ──────────────────────────────
@@ -217,7 +217,7 @@ func TestFormatMonitorTime_WithSeconds(t *testing.T) {
 
 func TestBuildMonitorURL(t *testing.T) {
 	params := map[string]string{
-		"namespace":  "system",
+		"namespace":   "system",
 		"metricNames": "cpu_usage",
 	}
 	result := buildMonitorURL("/monitor/controller/history", params)

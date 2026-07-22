@@ -442,7 +442,6 @@ func TestTransformDevice_MissingNested(t *testing.T) {
 	}
 }
 
-
 // Compile-time interface check
 var _ connector.Connector = (*NetboxConnector)(nil)
 

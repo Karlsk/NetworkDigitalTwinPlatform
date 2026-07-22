@@ -123,10 +123,10 @@ func (c *ControllerClient) FetchDeviceMetrics(
 	}
 
 	params := map[string]string{
-		"namespace":  "system",
+		"namespace":   "system",
 		"metricNames": strings.Join(metrics, ","),
-		"startTime":  formatMonitorTime(start),
-		"endTime":    formatMonitorTime(end),
+		"startTime":   formatMonitorTime(start),
+		"endTime":     formatMonitorTime(end),
 	}
 	path := buildMonitorURL("/monitor/controller/history", params)
 
@@ -157,14 +157,14 @@ func (c *ControllerClient) FetchPortMetrics(
 	}
 
 	params := map[string]string{
-		"namespace":            "port",
-		"metricNames":          strings.Join(metrics, ","),
-		"startTime":            formatMonitorTime(start),
-		"endTime":              formatMonitorTime(end),
-		"dimensions.0.name":    "switch",
-		"dimensions.0.value":   device,
-		"dimensions.1.name":    "port",
-		"dimensions.1.value":   port,
+		"namespace":          "port",
+		"metricNames":        strings.Join(metrics, ","),
+		"startTime":          formatMonitorTime(start),
+		"endTime":            formatMonitorTime(end),
+		"dimensions.0.name":  "switch",
+		"dimensions.0.value": device,
+		"dimensions.1.name":  "port",
+		"dimensions.1.value": port,
 	}
 	path := buildMonitorURL("/monitor/switch/history", params)
 
@@ -233,14 +233,14 @@ func (c *ControllerClient) FetchTunnelTraffic(
 	}
 
 	params := map[string]string{
-		"namespace":            "traffic",
-		"metricNames":          strings.Join(metrics, ","),
-		"startTime":            formatMonitorTime(start),
-		"endTime":              formatMonitorTime(end),
-		"dimensions.0.name":    "deviceName",
-		"dimensions.0.value":   device,
-		"dimensions.1.name":    "tunnelName",
-		"dimensions.1.value":   tunnel,
+		"namespace":          "traffic",
+		"metricNames":        strings.Join(metrics, ","),
+		"startTime":          formatMonitorTime(start),
+		"endTime":            formatMonitorTime(end),
+		"dimensions.0.name":  "deviceName",
+		"dimensions.0.value": device,
+		"dimensions.1.name":  "tunnelName",
+		"dimensions.1.value": tunnel,
 	}
 	path := buildMonitorURL("/monitor/te/history", params)
 

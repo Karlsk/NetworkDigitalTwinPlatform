@@ -586,7 +586,7 @@ func TestHTTPClient_TokenAuth_DirectValuePriority(t *testing.T) {
 		WithBaseURL(srv.URL),
 		WithAuth(AuthConfig{
 			Type:     "token",
-			Token:    "direct-wins",   // 直接值
+			Token:    "direct-wins",       // 直接值
 			TokenEnv: "MY_PRIORITY_TOKEN", // env 兜底
 		}),
 	)
@@ -859,5 +859,50 @@ func TestHTTPClient_BearerAuth_DirectValuePriority(t *testing.T) {
 	want := "Bearer direct-bearer-wins"
 	if gotAuth != want {
 		t.Errorf("Authorization = %q, want %q (direct value should take priority)", gotAuth, want)
+	}
+}
+
+// TestWithTransport 验证 WithTransport 选项正确设置自定义 Transport。
+func TestWithTransport(t *testing.T) {
+	customTransport := http.DefaultTransport
+	c := NewHTTPClient(WithTransport(customTransport))
+	if c.client.Transport != customTransport {
+		t.Error("WithTransport did not set custom transport")
+	}
+}
+
+// TestPostJSON 验证 PostJSON 自动设置 Content-Type 并发送请求。
+func TestPostJSON(t *testing.T) {
+	var gotContentType string
+	var gotBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotContentType = r.Header.Get("Content-Type")
+		b, _ := io.ReadAll(r.Body)
+		gotBody = string(b)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c := NewHTTPClient(WithBaseURL(srv.URL))
+	resp, err := c.PostJSON(context.Background(), "/api/test", strings.NewReader(`{"key":"val"}`))
+	if err != nil {
+		t.Fatalf("PostJSON() error = %v", err)
+	}
+	defer resp.Body.Close()
+
+	if gotContentType != "application/json" {
+		t.Errorf("Content-Type = %q, want application/json", gotContentType)
+	}
+	if gotBody != `{"key":"val"}` {
+		t.Errorf("body = %q, want {\"key\":\"val\"}", gotBody)
+	}
+}
+
+// TestSetAuthToken 验证 SetAuthToken 动态更新 Token。
+func TestSetAuthToken(t *testing.T) {
+	c := NewHTTPClient(WithAuth(AuthConfig{Type: "token", Token: "old"}))
+	c.SetAuthToken("new-token-123")
+	if c.auth.Token != "new-token-123" {
+		t.Errorf("Token = %q, want new-token-123", c.auth.Token)
 	}
 }

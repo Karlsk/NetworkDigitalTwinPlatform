@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"gitlab.com/pml/network-digital-twin/internal/connector"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gitlab.com/pml/network-digital-twin/internal/connector"
 )
 
 // ──────────────────────────────

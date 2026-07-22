@@ -24,9 +24,9 @@ import (
 // ControllerClient 骨干网操作系统 REST API 统一客户端。
 // Token 自动管理（过期刷新 + 60s 缓冲），所有 API 调用前自动 ensureToken。
 type ControllerClient struct {
-	http     *connector.HTTPClient
-	name     string
-	baseURL  string // API 基地址，供 Metadata 使用
+	http    *connector.HTTPClient
+	name    string
+	baseURL string // API 基地址，供 Metadata 使用
 
 	// Token 管理
 	tokenURL     string
@@ -217,4 +217,3 @@ func (c *ControllerClient) getDevices(ctx context.Context) ([]DeviceInfo, error)
 
 	return devices, nil
 }
-

@@ -81,8 +81,8 @@ func NewHTTPClient(opts ...HTTPOption) *HTTPClient {
 }
 
 const (
-	maxRetries        = 3              // 最大重试次数（不含首次请求）
-	retryBaseDelay    = 500 * time.Millisecond // 指数退避基准延迟
+	maxRetries     = 3                      // 最大重试次数（不含首次请求）
+	retryBaseDelay = 500 * time.Millisecond // 指数退避基准延迟
 )
 
 // applyAuth 注入认证 Header。
@@ -169,7 +169,7 @@ func (c *HTTPClient) Do(ctx context.Context, req *http.Request) (*http.Response,
 		// 5xx 触发重试
 		if resp.StatusCode >= 500 {
 			// drain and close before retry
-			io.Copy(io.Discard, resp.Body)
+			_, _ = io.Copy(io.Discard, resp.Body)
 			resp.Body.Close()
 			lastResp = nil
 			lastErr = fmt.Errorf("server error: status %d", resp.StatusCode)
