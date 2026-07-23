@@ -17,6 +17,9 @@ import (
 	"gitlab.com/pml/network-digital-twin/internal/graph"
 	"gitlab.com/pml/network-digital-twin/internal/observability"
 	"gitlab.com/pml/network-digital-twin/internal/repository"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // SnapshotMeta 快照元数据。
@@ -162,6 +165,13 @@ func (sm *SnapshotManager) cleanupExpired(ctx context.Context) {
 // Create 创建快照：从 default 逻辑 DB 导出数据并归档为 YAML 文件。
 // 使用 RLock 允许并发读，阻塞写操作。
 func (sm *SnapshotManager) Create(ctx context.Context, name string) (meta SnapshotMeta, err error) {
+	// V2-16: OpenTelemetry 手动 Span
+	tracer := otel.Tracer(observability.TracerName)
+	ctx, span := tracer.Start(ctx, "snapshot.create",
+		trace.WithAttributes(attribute.String("snapshot.name", name)),
+	)
+	defer span.End()
+
 	sm.lock.RLock()
 	defer sm.lock.RUnlock()
 
@@ -358,6 +368,13 @@ func (sm *SnapshotManager) warmCache(_ context.Context) ([]SnapshotMeta, error) 
 
 // Delete 删除快照：清理 Neo4j 逻辑 DB，保留 YAML 归档文件。
 func (sm *SnapshotManager) Delete(ctx context.Context, name string) (err error) {
+	// V2-16: OpenTelemetry 手动 Span
+	tracer := otel.Tracer(observability.TracerName)
+	ctx, span := tracer.Start(ctx, "snapshot.delete",
+		trace.WithAttributes(attribute.String("snapshot.name", name)),
+	)
+	defer span.End()
+
 	// V1-18: 审计日志 — 无论成功失败都记录
 	defer func() { //nolint:contextcheck // defer 闭包中无法传递 ctx
 		sm.auditLog.Record(AuditEntry{
@@ -436,6 +453,13 @@ func extractProps(v any) map[string]any {
 // Restore 恢复快照到 default 逻辑 DB。
 // 获取写锁，确保恢复期间无其他写操作。
 func (sm *SnapshotManager) Restore(ctx context.Context, name string) (err error) {
+	// V2-16: OpenTelemetry 手动 Span
+	tracer := otel.Tracer(observability.TracerName)
+	ctx, span := tracer.Start(ctx, "snapshot.restore",
+		trace.WithAttributes(attribute.String("snapshot.name", name)),
+	)
+	defer span.End()
+
 	sm.lock.Lock()
 	defer sm.lock.Unlock()
 
@@ -525,7 +549,7 @@ func (sm *SnapshotManager) Diff(ctx context.Context, a, b string) (diff *Snapsho
 
 	// b 中有而 a 中没有的节点（新增）
 	addedNodeRows, err := sm.graph.Query(ctx, b,
-		`MATCH (n) WHERE NOT EXISTS { MATCH (m {_db: $other, uri: n.uri}) } `+
+		`MATCH (n) WHERE n._db = $_db AND NOT EXISTS { MATCH (m {_db: $other, uri: n.uri}) } `+
 			`RETURN labels(n) AS labels, n.uri AS uri, properties(n) AS props`,
 		map[string]any{"other": a})
 	if err != nil {
@@ -543,7 +567,7 @@ func (sm *SnapshotManager) Diff(ctx context.Context, a, b string) (diff *Snapsho
 
 	// a 中有而 b 中没有的节点（删除）
 	removedNodeRows, err := sm.graph.Query(ctx, a,
-		`MATCH (n) WHERE NOT EXISTS { MATCH (m {_db: $other, uri: n.uri}) } `+
+		`MATCH (n) WHERE n._db = $_db AND NOT EXISTS { MATCH (m {_db: $other, uri: n.uri}) } `+
 			`RETURN labels(n) AS labels, n.uri AS uri, properties(n) AS props`,
 		map[string]any{"other": b})
 	if err != nil {
@@ -561,7 +585,7 @@ func (sm *SnapshotManager) Diff(ctx context.Context, a, b string) (diff *Snapsho
 
 	// b 中有而 a 中没有的关系（新增）
 	addedRelRows, err := sm.graph.Query(ctx, b,
-		`MATCH (src)-[r]->(dst) WHERE NOT EXISTS { `+
+		`MATCH (src)-[r]->(dst) WHERE src._db = $_db AND NOT EXISTS { `+
 			`MATCH (otherSrc {_db: $other, uri: src.uri})-[r2]->(otherDst {_db: $other, uri: dst.uri}) `+
 			`WHERE type(r2) = type(r) } `+
 			`RETURN type(r) AS type, src.uri AS from, dst.uri AS to, properties(r) AS props`,
@@ -582,7 +606,7 @@ func (sm *SnapshotManager) Diff(ctx context.Context, a, b string) (diff *Snapsho
 
 	// a 中有而 b 中没有的关系（删除）
 	removedRelRows, err := sm.graph.Query(ctx, a,
-		`MATCH (src)-[r]->(dst) WHERE NOT EXISTS { `+
+		`MATCH (src)-[r]->(dst) WHERE src._db = $_db AND NOT EXISTS { `+
 			`MATCH (otherSrc {_db: $other, uri: src.uri})-[r2]->(otherDst {_db: $other, uri: dst.uri}) `+
 			`WHERE type(r2) = type(r) } `+
 			`RETURN type(r) AS type, src.uri AS from, dst.uri AS to, properties(r) AS props`,

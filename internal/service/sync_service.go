@@ -16,6 +16,9 @@ import (
 	"gitlab.com/pml/network-digital-twin/internal/observability"
 	"gitlab.com/pml/network-digital-twin/internal/repository"
 	"gitlab.com/pml/network-digital-twin/internal/snapshot"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // SyncResult 同步结果统计。
@@ -97,6 +100,13 @@ func NewSyncService(
 // FullSync 全量同步：持有写锁 → ClearDB → 全量拉取 → Normalizer → Assembler → BulkCreate。
 // 单个 Connector/Normalizer 失败不阻断整个同步（容错策略）。
 func (s *SyncService) FullSync(ctx context.Context) (*SyncResult, error) {
+	// V2-16: OpenTelemetry 手动 Span
+	tracer := otel.Tracer(observability.TracerName)
+	ctx, span := tracer.Start(ctx, "sync.full_sync",
+		trace.WithAttributes(attribute.String("sync.type", "full")),
+	)
+	defer span.End()
+
 	start := time.Now()
 
 	// 1. 持有写锁（defer 确保异常时也释放）
@@ -185,6 +195,16 @@ func (s *SyncService) FullSync(ctx context.Context) (*SyncResult, error) {
 // 本方法不加锁，由 StartConsumer 在消费循环中管理 GraphLock。
 // Action 支持: "update" (MERGE), "delete" (DETACH DELETE), "delete_relation" (仅删除关系)。
 func (s *SyncService) IncrementalSync(ctx context.Context, event SyncEvent) (*SyncResult, error) {
+	// V2-16: OpenTelemetry 手动 Span
+	tracer := otel.Tracer(observability.TracerName)
+	ctx, span := tracer.Start(ctx, "sync.incremental_sync",
+		trace.WithAttributes(
+			attribute.String("sync.type", "incremental"),
+			attribute.String("sync.action", event.Action),
+		),
+	)
+	defer span.End()
+
 	start := time.Now()
 
 	switch event.Action {

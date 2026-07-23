@@ -23,7 +23,7 @@ channel:
 # 负责从外部系统接收数据变更事件
 # 支持两种数据源：Webhook（HTTP 回调）和 Kafka（消息队列）
 kafka:
-  enabled: true                       # 启用 Kafka DataSource Consumer
+  enabled: false                      # V1 兼容默认关闭，需外部 Kafka 可用时启用
   brokers: ["172.17.1.224:9092"]
   topic: "external-sync-events"       # 外部事件 Topic（DataSource 层）
   group_id: "network-twin"
@@ -33,7 +33,7 @@ kafka:
 # 支持两种实现："channel"（内存）和 "kafka"（持久化）
 # Fallback 机制仅作用于 EventBus 层：当 mode=kafka 且 Kafka 不可用时自动降级到 channel
 event_bus:
-  mode: "kafka"                       # 使用 Kafka 模式（含 FallbackPublisher）
+  mode: "channel"                     # V1 兼容默认 Channel 模式（内存），"kafka" = 持久化
   kafka:
     brokers: ["172.17.1.224:9092"]
     topic: "internal-sync-events"     # 内部事件 Topic（EventBus 层）

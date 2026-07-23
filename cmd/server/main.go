@@ -38,6 +38,7 @@ import (
 	"gitlab.com/pml/network-digital-twin/internal/graph"
 	intmcp "gitlab.com/pml/network-digital-twin/internal/mcp"
 	"gitlab.com/pml/network-digital-twin/internal/normalizer"
+	"gitlab.com/pml/network-digital-twin/internal/observability"
 	"gitlab.com/pml/network-digital-twin/internal/repository"
 	"gitlab.com/pml/network-digital-twin/internal/schema"
 	"gitlab.com/pml/network-digital-twin/internal/service"
@@ -51,6 +52,14 @@ func main() {
 		slog.Error("failed to load config", "error", err)
 		os.Exit(1)
 	}
+
+	// 1.1 初始化 OpenTelemetry TracerProvider（V2-16）
+	tp, err := observability.InitTracer(context.Background(), cfg.Observability.ServiceName, cfg.Observability.OTelEndpoint)
+	if err != nil {
+		slog.Error("failed to init tracer", "error", err)
+		os.Exit(1)
+	}
+	defer func() { _ = tp.Shutdown(context.Background()) }()
 
 	// 2. 初始化 SchemaRegistry + 加载 ontology
 	reg := schema.NewSchemaRegistry()

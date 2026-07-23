@@ -12,6 +12,10 @@ import (
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j/auth"
 	"gitlab.com/pml/network-digital-twin/internal/assembler"
 	"gitlab.com/pml/network-digital-twin/internal/config"
+	"gitlab.com/pml/network-digital-twin/internal/observability"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // driverFactory 是 driver 创建函数的抽象点，默认指向官方实现。
@@ -107,6 +111,16 @@ func (c *neo4jClient) Close() error {
 // Query 执行 Cypher 查询（驱动层自动注入 $_db）。
 // 创建 params 的副本并注入 _db，避免修改调用方的原始 map。
 func (c *neo4jClient) Query(ctx context.Context, db string, cypher string, params map[string]any) ([]map[string]any, error) {
+	// V2-16: OpenTelemetry 手动 Span
+	tracer := otel.Tracer(observability.TracerName)
+	ctx, span := tracer.Start(ctx, "graph.query",
+		trace.WithAttributes(
+			attribute.String("db.name", db),
+			attribute.String("db.system", "neo4j"),
+		),
+	)
+	defer span.End()
+
 	merged := make(map[string]any, len(params)+1)
 	for k, v := range params {
 		merged[k] = v

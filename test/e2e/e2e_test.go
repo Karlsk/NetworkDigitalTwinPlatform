@@ -274,8 +274,12 @@ func TestE2E_SnapshotLifecycle(t *testing.T) {
 	lock := snapshot.NewGraphLock()
 	mgr := snapshot.NewSnapshotManager(client, lock, snapDir, 5)
 
+	// 使用唯一名称避免与残留逻辑 DB 冲突（残留节点可能无 _db 属性，ClearDB 无法清理）
+	snap1Name := uniqueDBName(t) + "_s1"
+	snap2Name := uniqueDBName(t) + "_s2"
+
 	// === Create 第一个快照 ===
-	snap1, err := mgr.Create(ctx, "snap-001")
+	snap1, err := mgr.Create(ctx, snap1Name)
 	if err != nil {
 		t.Fatalf("Create(snap-001) error = %v", err)
 	}
@@ -309,7 +313,7 @@ func TestE2E_SnapshotLifecycle(t *testing.T) {
 	}
 
 	// === Create 第二个快照（含新节点） ===
-	snap2, err := mgr.Create(ctx, "snap-002")
+	snap2, err := mgr.Create(ctx, snap2Name)
 	if err != nil {
 		t.Fatalf("Create(snap-002) error = %v", err)
 	}
@@ -318,7 +322,7 @@ func TestE2E_SnapshotLifecycle(t *testing.T) {
 	}
 
 	// === Restore 到 snap-001 ===
-	if err := mgr.Restore(ctx, "snap-001"); err != nil {
+	if err := mgr.Restore(ctx, snap1Name); err != nil {
 		t.Fatalf("Restore(snap-001) error = %v", err)
 	}
 
@@ -328,7 +332,7 @@ func TestE2E_SnapshotLifecycle(t *testing.T) {
 	}
 
 	// === Diff 对比 snap-001 和 snap-002 ===
-	diff, err := mgr.Diff(ctx, "snap-001", "snap-002")
+	diff, err := mgr.Diff(ctx, snap1Name, snap2Name)
 	if err != nil {
 		t.Fatalf("Diff error = %v", err)
 	}
@@ -344,8 +348,8 @@ func TestE2E_SnapshotLifecycle(t *testing.T) {
 	}
 
 	// === 清理快照逻辑 DB ===
-	_ = mgr.Delete(ctx, "snap-001")
-	_ = mgr.Delete(ctx, "snap-002")
+	_ = mgr.Delete(ctx, snap1Name)
+	_ = mgr.Delete(ctx, snap2Name)
 }
 
 // TestE2E_LogicalDBIsolation 验证逻辑 DB 隔离，不同 _db 的数据互不干扰。

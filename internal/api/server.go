@@ -33,12 +33,13 @@ func NewServer() *Server {
 	}
 	engine := gin.New()
 
-	// 全局中间件链：Recovery → CORS → RequestID → Logger → Metrics → RateLimit → CircuitBreaker
+	// 全局中间件链：Recovery → CORS → RequestID → Logger → Tracing → Metrics → RateLimit → CircuitBreaker
 	engine.Use(
 		gin.Recovery(),                               // panic 恢复
 		middleware.CORS(),                            // 跨域
 		middleware.RequestID(),                       // 请求 ID
 		middleware.Logger(),                          // 请求日志
+		middleware.Tracing(),                         // OpenTelemetry 追踪
 		middleware.Metrics(),                         // Prometheus 指标
 		middleware.RateLimit(100, 200),               // 限流
 		middleware.CircuitBreaker(5, 30*time.Second), // 熔断
