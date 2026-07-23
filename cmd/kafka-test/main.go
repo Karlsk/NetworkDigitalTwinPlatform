@@ -200,10 +200,15 @@ func makeTestEvents(count int) []events.SyncEvent {
 
 // consumeEvents 启动 consumer 并收集指定数量的事件，超时自动退出。
 func consumeEvents(consumer events.EventConsumer, count int) ([]events.SyncEvent, error) {
+	return consumeEventsWithTimeout(consumer, count, consumeTimeout)
+}
+
+// consumeEventsWithTimeout 可指定超时的 consumeEvents 版本（便于测试）。
+func consumeEventsWithTimeout(consumer events.EventConsumer, count int, timeout time.Duration) ([]events.SyncEvent, error) {
 	var (
 		mu          sync.Mutex
 		received    []events.SyncEvent
-		ctx, cancel = context.WithTimeout(context.Background(), consumeTimeout)
+		ctx, cancel = context.WithTimeout(context.Background(), timeout)
 	)
 	defer cancel()
 

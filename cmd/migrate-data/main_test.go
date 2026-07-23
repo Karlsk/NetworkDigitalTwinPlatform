@@ -8,6 +8,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"gitlab.com/pml/network-digital-twin/internal/repository"
 	"gitlab.com/pml/network-digital-twin/internal/snapshot"
 )
 
@@ -130,3 +131,113 @@ type mockErr struct {
 }
 
 func (e *mockErr) Error() string { return e.msg }
+
+// mockSnapshotRepo 模拟 SnapshotRepository，用于测试非 dry-run 路径。
+type mockSnapshotRepo struct {
+	created  []*repository.SnapshotRecord
+	failNext bool
+	dupNext  bool
+}
+
+func (m *mockSnapshotRepo) Create(ctx context.Context, rec *repository.SnapshotRecord) error {
+	if m.dupNext {
+		m.dupNext = false
+		return &mockErr{msg: `ERROR: duplicate key value violates unique constraint "snapshots_name_key" (SQLSTATE 23505)`}
+	}
+	if m.failNext {
+		m.failNext = false
+		return &mockErr{msg: "connection lost"}
+	}
+	m.created = append(m.created, rec)
+	return nil
+}
+
+func (m *mockSnapshotRepo) GetByName(ctx context.Context, name string) (*repository.SnapshotRecord, error) {
+	return nil, nil
+}
+func (m *mockSnapshotRepo) List(ctx context.Context) ([]repository.SnapshotRecord, error) {
+	return nil, nil
+}
+func (m *mockSnapshotRepo) Delete(ctx context.Context, name string) error { return nil }
+func (m *mockSnapshotRepo) UpdateStatus(ctx context.Context, name, status string) error {
+	return nil
+}
+
+// TestMigrateSnapshots_NonDryRun_Success 验证非 dry-run 模式下成功写入 PG。
+func TestMigrateSnapshots_NonDryRun_Success(t *testing.T) {
+	tmpDir := t.TempDir()
+	testYAML := `kind: SnapshotMeta
+name: test-migrate-pg
+created_at: 2026-07-01T12:00:00+08:00
+node_count: 10
+rel_count: 5
+`
+	err := os.WriteFile(filepath.Join(tmpDir, "snap.yaml"), []byte(testYAML), 0644)
+	require.NoError(t, err)
+
+	repo := &mockSnapshotRepo{}
+	stats, err := MigrateSnapshots(context.Background(), tmpDir, false, repo)
+	require.NoError(t, err)
+	require.Equal(t, 1, stats.Scanned)
+	require.Equal(t, 1, stats.Created)
+	require.Equal(t, 0, stats.Skipped)
+	require.Equal(t, 0, stats.Failed)
+	require.Len(t, repo.created, 1)
+	require.Equal(t, "test-migrate-pg", repo.created[0].Name)
+	require.Equal(t, 10, repo.created[0].NodeCount)
+	require.Equal(t, 5, repo.created[0].RelCount)
+}
+
+// TestMigrateSnapshots_NonDryRun_Duplicate 验证重复记录被跳过。
+func TestMigrateSnapshots_NonDryRun_Duplicate(t *testing.T) {
+	tmpDir := t.TempDir()
+	testYAML := `kind: SnapshotMeta
+name: dup-snap
+created_at: 2026-07-01T12:00:00+08:00
+node_count: 1
+rel_count: 0
+`
+	err := os.WriteFile(filepath.Join(tmpDir, "dup.yaml"), []byte(testYAML), 0644)
+	require.NoError(t, err)
+
+	repo := &mockSnapshotRepo{dupNext: true}
+	stats, err := MigrateSnapshots(context.Background(), tmpDir, false, repo)
+	require.NoError(t, err)
+	require.Equal(t, 1, stats.Scanned)
+	require.Equal(t, 0, stats.Created)
+	require.Equal(t, 1, stats.Skipped)
+	require.Equal(t, 0, stats.Failed)
+}
+
+// TestMigrateSnapshots_NonDryRun_Error 验证写入失败计入 Failed。
+func TestMigrateSnapshots_NonDryRun_Error(t *testing.T) {
+	tmpDir := t.TempDir()
+	testYAML := `kind: SnapshotMeta
+name: fail-snap
+created_at: 2026-07-01T12:00:00+08:00
+node_count: 1
+rel_count: 0
+`
+	err := os.WriteFile(filepath.Join(tmpDir, "fail.yaml"), []byte(testYAML), 0644)
+	require.NoError(t, err)
+
+	repo := &mockSnapshotRepo{failNext: true}
+	stats, err := MigrateSnapshots(context.Background(), tmpDir, false, repo)
+	require.NoError(t, err)
+	require.Equal(t, 1, stats.Scanned)
+	require.Equal(t, 0, stats.Created)
+	require.Equal(t, 0, stats.Skipped)
+	require.Equal(t, 1, stats.Failed)
+}
+
+// TestMigrateSnapshots_NonExistentDir 验证不存在的目录返回错误。
+func TestMigrateSnapshots_NonExistentDir(t *testing.T) {
+	_, err := MigrateSnapshots(context.Background(), "/nonexistent/path/xyz", true, nil)
+	require.Error(t, err)
+}
+
+// TestIsDuplicateError_23505 验证 SQLSTATE 23505 检测。
+func TestIsDuplicateError_23505(t *testing.T) {
+	err := &mockErr{msg: "pq: 23505 unique violation"}
+	require.True(t, isDuplicateError(err))
+}

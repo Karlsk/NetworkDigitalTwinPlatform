@@ -13,14 +13,15 @@ import (
 //   - DataSource 层（Kafka）：从外部系统接收事件，cfg.Kafka.Enabled 控制是否启用
 //   - EventBus 层（Channel/Kafka）：内部事件管道，cfg.EventBus.Mode 控制实现模式
 type Config struct {
-	Neo4J    Neo4JConfig    `mapstructure:"neo4j"`
-	Server   ServerConfig   `mapstructure:"server"`
-	Snapshot SnapshotConfig `mapstructure:"snapshot"`
-	Schema   SchemaConfig   `mapstructure:"schema"`
-	Channel  ChannelConfig  `mapstructure:"channel"`
-	Kafka    KafkaConfig    `mapstructure:"kafka"`     // 数据源层（DataSource Layer）
-	EventBus EventBusConfig `mapstructure:"event_bus"` // 事件总线层（EventBus Layer）
-	Postgres PGConfig       `mapstructure:"postgres"`  // V2: PostgreSQL 元数据存储
+	Neo4J         Neo4JConfig         `mapstructure:"neo4j"`
+	Server        ServerConfig        `mapstructure:"server"`
+	Snapshot      SnapshotConfig      `mapstructure:"snapshot"`
+	Schema        SchemaConfig        `mapstructure:"schema"`
+	Channel       ChannelConfig       `mapstructure:"channel"`
+	Kafka         KafkaConfig         `mapstructure:"kafka"`         // 数据源层（DataSource Layer）
+	EventBus      EventBusConfig      `mapstructure:"event_bus"`     // 事件总线层（EventBus Layer）
+	Postgres      PGConfig            `mapstructure:"postgres"`      // V2: PostgreSQL 元数据存储
+	Observability ObservabilityConfig `mapstructure:"observability"` // V2: 可观测性（OTel 追踪）
 }
 
 // Neo4JConfig 是 Neo4j 连接配置
@@ -97,6 +98,13 @@ type PGConfig struct {
 	MinConns int32  `mapstructure:"min_conns"` // 最小连接数，默认 2
 }
 
+// ObservabilityConfig 可观测性配置（V2-16）。
+// OTelEndpoint 为空时使用 Noop Tracer，零开销，向后兼容 V1。
+type ObservabilityConfig struct {
+	OTelEndpoint string `mapstructure:"otel_endpoint"` // OTLP Collector 地址，空 = Noop
+	ServiceName  string `mapstructure:"service_name"`  // 服务名称，默认 network-digital-twin
+}
+
 // Load 从 YAML 文件加载配置，支持环境变量覆盖
 // path: 配置文件路径（如 configs/config.yaml）
 func Load(path string) (*Config, error) {
@@ -121,6 +129,8 @@ func Load(path string) (*Config, error) {
 	v.SetDefault("postgres.enabled", false)
 	v.SetDefault("postgres.max_conns", 10)
 	v.SetDefault("postgres.min_conns", 2)
+	v.SetDefault("observability.otel_endpoint", "")                  // 默认 Noop
+	v.SetDefault("observability.service_name", "network-digital-twin")
 
 	if err := v.ReadInConfig(); err != nil {
 		return nil, fmt.Errorf("read config %s: %w", path, err)
@@ -165,6 +175,13 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if v := envStr("POSTGRES_URL"); v != "" {
 		cfg.Postgres.URL = v
+	}
+	// 可观测性（OTel 追踪）
+	if v := envStr("OTEL_ENDPOINT"); v != "" {
+		cfg.Observability.OTelEndpoint = v
+	}
+	if v := envStr("SERVICE_NAME"); v != "" {
+		cfg.Observability.ServiceName = v
 	}
 }
 

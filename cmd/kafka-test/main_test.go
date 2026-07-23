@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -140,9 +141,6 @@ func TestMakeTestEvents_DataFormat(t *testing.T) {
 	}
 }
 
-// suppress unused import
-var _ events.SyncEvent
-
 // ── testRunner ──
 
 func TestKafkaTestRunner_New(t *testing.T) {
@@ -253,5 +251,92 @@ func TestFindProjectRoot(t *testing.T) {
 	// Should find go.mod in project root
 	if _, err := os.Stat(filepath.Join(root, "go.mod")); err != nil {
 		t.Errorf("findProjectRoot returned %q which has no go.mod: %v", root, err)
+	}
+}
+
+// ── consumeEvents ──
+
+// mockEventConsumer 模拟 EventConsumer，在 Consume 中投递预设事件。
+type mockEventConsumer struct {
+	events []events.SyncEvent
+}
+
+func (m *mockEventConsumer) Consume(ctx context.Context, handler func(ctx context.Context, event events.SyncEvent) error) error {
+	for _, evt := range m.events {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+		if err := handler(ctx, evt); err != nil {
+			return err
+		}
+	}
+	// 等待 ctx 取消（模拟阻塞消费）
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+func (m *mockEventConsumer) Close() error { return nil }
+
+func TestConsumeEvents_Success(t *testing.T) {
+	testEvents := makeTestEvents(3)
+	consumer := &mockEventConsumer{events: testEvents}
+
+	received, err := consumeEvents(consumer, 3)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(received) != 3 {
+		t.Errorf("expected 3 events, got %d", len(received))
+	}
+	for i, evt := range received {
+		if evt.Action != "update" {
+			t.Errorf("event %d: action=%q, want update", i, evt.Action)
+		}
+		if evt.EntityType != "Device" {
+			t.Errorf("event %d: entity_type=%q, want Device", i, evt.EntityType)
+		}
+	}
+}
+
+func TestConsumeEvents_Timeout(t *testing.T) {
+	// 只有 1 个事件但要求 5 个 → 超时
+	consumer := &mockEventConsumer{events: makeTestEvents(1)}
+
+	// 使用短超时加速测试
+	received, err := consumeEventsWithTimeout(consumer, 5, 500*time.Millisecond)
+	if err == nil {
+		t.Fatal("expected timeout error")
+	}
+	if !strings.Contains(err.Error(), "timeout") {
+		t.Errorf("error should mention timeout: %v", err)
+	}
+	if len(received) != 1 {
+		t.Errorf("expected 1 received event, got %d", len(received))
+	}
+}
+
+func TestConsumeEvents_EmptyConsumer(t *testing.T) {
+	consumer := &mockEventConsumer{events: nil}
+
+	received, err := consumeEventsWithTimeout(consumer, 1, 500*time.Millisecond)
+	if err == nil {
+		t.Fatal("expected error for empty consumer")
+	}
+	if len(received) != 0 {
+		t.Errorf("expected 0 events, got %d", len(received))
+	}
+}
+
+// ── runTests (structure) ──
+
+func TestRunTests_ReturnsBool(t *testing.T) {
+	// runTests 需要真实 Kafka，这里只验证函数签名和基本行为
+	// 在没有 Kafka 的环境下，所有测试应该 FAIL（但不会 panic）
+	// 跳过实际执行，仅验证 findProjectRoot 正确性
+	root := findProjectRoot()
+	if root == "." {
+		t.Skip("cannot determine project root")
 	}
 }

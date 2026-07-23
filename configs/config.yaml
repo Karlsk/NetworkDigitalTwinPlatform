@@ -47,3 +47,10 @@ postgres:
   url: "postgres://twin:twin@localhost:5432/twin?sslmode=disable"
   max_conns: 10
   min_conns: 2
+
+# ==================== 可观测性 (Observability) ====================
+# V2-16: OpenTelemetry 分布式追踪 + Prometheus 指标
+# otel_endpoint 为空时使用 Noop Tracer，零开销，向后兼容 V1
+observability:
+  otel_endpoint: ""                       # OTLP Collector 地址，空 = Noop
+  service_name: "network-digital-twin"    # 服务名称（用于 Span 资源标签）
